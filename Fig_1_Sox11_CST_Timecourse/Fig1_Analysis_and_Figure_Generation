@@ -1,0 +1,749 @@
+####################################################################
+#OVERVIEW#
+####################################################################
+#The source files for this script are available through NCBI GEO: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE308576
+#The file used for de-multiplexing the pooled time points is provided in the folder called "Input" within this repository folder
+
+#This script inputs 2 libraries (1 Sox11-Treated and 1 Control), performs quality control, merges, and identifies DEGs.
+#The first library is from CST neurons that received AAV2-Retro-Sox11.
+# Four timepoints, each with a separate barcode, were pooled
+#   - 1 week Sox11, marked by Malat-BC0 (BRCD.00.150)
+#   - 2 weeks Sox11, marked by Malat-BC1 (BRCD.01.140)
+#   - 4 weeks Sox11, marked by Malat-BC3 (BRCD.03.140)
+#   - 6 weeks Sox11, marked by Malat-BC1020 (BRCD.102.226)
+
+#The second library is from CST neurons that received control virus. It is designated 11-24 based on the date of creation
+
+#The script generates also creates images for Figure 1, associated data, and supplementary data. 
+#This script was run on R version 4.4.3
+#The libraries need to run the script are found below. 
+
+# Load libraries
+library('Seurat')
+library('ggplot2')
+library('dplyr')
+library('devtools')
+library('viridis')
+library('org.Mn.eg.db')
+library('clusterProfiler')
+library('ggrepel')
+library('ggthemes')
+
+##########################################################################
+#DATA PROCESSING#
+##########################################################################
+
+#Set working directory (will change based on user).
+
+setwd("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_1")
+
+######################################################################################################################
+# Input Sox11 library and perform quality control to remove any trace non-CST nuclei
+######################################################################################################################
+
+Sox11_CST_TC.data <- Read10X(data.dir = "1_Source_Files_Sox11")
+
+Sox11_CST_TC <- CreateSeuratObject(counts = Sox11_CST_TC.data, project = "Sox11_CST_TC", 
+                              min.cells = 3, min.features = 1000)
+Sox11_CST_TC
+
+# Initially 4737 nuclei.
+
+VlnPlot(Sox11_CST_TC, features = c("nFeature_RNA"))
+
+Sox11_CST_TC <- subset(Sox11_CST_TC, subset = nFeature_RNA > 1000 & nFeature_RNA < 8000)
+
+Sox11_CST_TC
+
+# 4737 remain.
+
+#Cluster.
+
+Sox11_CST_TC <- NormalizeData(Sox11_CST_TC, normalization.method = "LogNormalize", scale.factor = 10000)
+
+Sox11_CST_TC <- FindVariableFeatures(Sox11_CST_TC, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(Sox11_CST_TC)
+
+Sox11_CST_TC <- ScaleData(Sox11_CST_TC, features = all.genes)
+
+Sox11_CST_TC <- RunPCA(Sox11_CST_TC, features = VariableFeatures(object = Sox11_CST_TC), npcs = 100)
+
+Sox11_CST_TC <- FindNeighbors(Sox11_CST_TC, dims = 1:30)
+
+Sox11_CST_TC <- FindClusters(Sox11_CST_TC, resolution = 0.5)
+
+Sox11_CST_TC <- RunUMAP(Sox11_CST_TC, dims = 1:30)
+
+#A Dimplot for initial visualization
+
+DimPlot(Sox11_CST_TC, reduction = "umap", label = TRUE, pt.size = 1, label.size = 10
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text (size = 20)) #2880 x 1500
+
+#Detect and exclude any non-CST nuclei
+
+#The strategy is to use pan-cortical markers to determine which clusters are cortical, 
+# then use a combination of positive and negative CST markers to identify any spurious cortical clusters,
+# meaning definitively cortical but not CST
+
+#Pan-cortical markers: Mef2c, Camk2a, Ptk2b, Satb2
+#Positive CST markers: Crym, Fezf2, Bcl6, Bcl11b
+#Negative CST markers: Slc30a3 (intracortical), Sulf1 (layer VI), Cux2 (shallow layer)
+
+# A dotplot with the above markers
+
+DotPlot(Sox11_CST_TC, features = c("Mef2c", "Camk2a", "Ptk2b", "Satb2", 
+                                        "Crym", "Fezf2", "Bcl6", "Slc30a3", "Sulf1",
+                                        "Bcl11b","Cux2","Dcc","Unc5d"),
+        dot.scale = 4, dot.min = 0) + coord_flip() +
+  theme(axis.text.x = element_text(angle = 0, hjust = .5),
+        axis.text = element_text(size = 10)) #Sized for display
+
+#Based on this, clusters 5 and 6 are removed as non-CST
+
+Sox11_CST_TC <- subset(Sox11_CST_TC, idents = c("5","6"), invert = TRUE)
+
+Sox11_CST_TC
+
+#4503 nuclei remain
+
+#recluster the remaining nuclei
+
+Sox11_CST_TC <- NormalizeData(Sox11_CST_TC, normalization.method = "LogNormalize", scale.factor = 10000)
+
+Sox11_CST_TC <- FindVariableFeatures(Sox11_CST_TC, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(Sox11_CST_TC)
+
+Sox11_CST_TC <- ScaleData(Sox11_CST_TC, features = all.genes)
+
+Sox11_CST_TC <- RunPCA(Sox11_CST_TC, features = VariableFeatures(object = Sox11_CST_TC), npcs = 100)
+
+Sox11_CST_TC <- FindNeighbors(Sox11_CST_TC, dims = 1:30)
+
+Sox11_CST_TC <- FindClusters(Sox11_CST_TC, resolution = 0.5)
+
+Sox11_CST_TC <- RunUMAP(Sox11_CST_TC, dims = 1:30)
+
+#A Dimplot for initial visualization
+
+DimPlot(Sox11_CST_TC, reduction = "umap", label = TRUE, pt.size = 1, label.size = 10
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text (size = 20)) #2880 x 1500
+
+#Save RDS file, which can be subsequently called for merging and DEG detection.
+
+saveRDS(Sox11_CST_TC, "4_RDS_Files/Sox11_CST_TC.rds")
+
+
+#########################################################################################################
+#LOAD THE CONTROL CST DATA AND PERFORM QUALITY CONTROL TO REMOVE ANY TRACE NON-CST NUCLEI
+#########################################################################################################
+
+
+CST_Control_11_24.data <- Read10X(data.dir = "1_Source_Files_Control")
+
+CST_Control_11_24 <- CreateSeuratObject(counts = CST_Control_11_24.data, project = "CST_Control_11_24", 
+                                   min.cells = 3, min.features = 1000)
+CST_Control_11_24
+
+# Initially 4025 nuclei
+
+VlnPlot(CST_Control_11_24, features = c("nFeature_RNA"))
+
+CST_Control_11_24 <- subset(CST_Control_11_24, subset = nFeature_RNA > 1000 & nFeature_RNA < 8000)
+
+CST_Control_11_24
+
+# 4022 remain
+
+#Cluster
+
+CST_Control_11_24 <- NormalizeData(CST_Control_11_24, normalization.method = "LogNormalize", scale.factor = 10000)
+
+CST_Control_11_24 <- FindVariableFeatures(CST_Control_11_24, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(CST_Control_11_24)
+
+CST_Control_11_24 <- ScaleData(CST_Control_11_24, features = all.genes)
+
+CST_Control_11_24 <- RunPCA(CST_Control_11_24, features = VariableFeatures(object = CST_Control_11_24), npcs = 100)
+
+CST_Control_11_24 <- FindNeighbors(CST_Control_11_24, dims = 1:30)
+
+CST_Control_11_24 <- FindClusters(CST_Control_11_24, resolution = 0.5)
+
+CST_Control_11_24 <- RunUMAP(CST_Control_11_24, dims = 1:30)
+
+#A Dimplot for initial visualization
+
+DimPlot(CST_Control_11_24, reduction = "umap", label = TRUE, pt.size = 1, label.size = 10
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text (size = 20)) #2880 x 1500
+
+
+# Identify and remove non-CST nuclei, then re-cluster.
+#Pan-cortical markers: Mef2c, Camk2a, Ptk2b, Satb2
+#Positive CST markers: Crym, Fezf2, Bcl6, Bcl11b ((also inhibitory neurons, but these are excluded via Gad2))
+#Negative CST markers: Slc30a3 (intracortical), Sulf1 (layer VI), Cux2 (shallow layer)
+
+# A dotplot with the above markers
+
+DotPlot(CST_Control_11_24, features = c("Mef2c", "Camk2a", "Ptk2b", "Satb2", 
+                                   "Crym", "Fezf2", "Bcl6", "Slc30a3", "Sulf1",
+                                   "Bcl11b","Cux2","Dcc","Unc5d"),
+        dot.scale = 4, dot.min = 0) + coord_flip() +
+  theme(axis.text.x = element_text(angle = 0, hjust = .5),
+        axis.text = element_text(size = 10)) #Sized for display
+
+#Based on this, clusters 5 and 6 are removed as non-CST.
+
+CST_Control_11_24 <- subset(CST_Control_11_24, idents = c("5","6"), invert = TRUE)
+
+CST_Control_11_24
+
+#3821 nuclei remain
+
+#recluster the remaining nuclei.
+
+CST_Control_11_24 <- NormalizeData(CST_Control_11_24, normalization.method = "LogNormalize", scale.factor = 10000)
+
+CST_Control_11_24 <- FindVariableFeatures(CST_Control_11_24, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(CST_Control_11_24)
+
+CST_Control_11_24 <- ScaleData(CST_Control_11_24, features = all.genes)
+
+CST_Control_11_24 <- RunPCA(CST_Control_11_24, features = VariableFeatures(object = CST_Control_11_24), npcs = 100)
+
+CST_Control_11_24 <- FindNeighbors(CST_Control_11_24, dims = 1:30)
+
+CST_Control_11_24 <- FindClusters(CST_Control_11_24, resolution = 0.5)
+
+CST_Control_11_24 <- RunUMAP(CST_Control_11_24, dims = 1:30)
+
+#A Dimplot just to get a sense of the cluster distribution
+
+DimPlot(CST_Control_11_24, reduction = "umap", label = TRUE, pt.size = 1, label.size = 10
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text (size = 20)) #2880 x 1500
+
+
+#Save RDS file for subsequent merging and DEG detection
+
+saveRDS(CST_Control_11_24, "4_RDS_Files/CST_Control_11_24.rds")
+
+###########################################################################################
+#MERGE Sox11 TIME COURSE AND CONTROL DATA SETS
+###########################################################################################
+
+Sox11_Control_CST_TC_merge.list <- list (Sox11_CST_TC, CST_Control_11_24)
+
+Sox11_Control_CST_TC_merge.list <- lapply(X=Sox11_Control_CST_TC_merge.list, FUN = function(x) {
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+features <- SelectIntegrationFeatures(object.list = Sox11_Control_CST_TC_merge.list)
+
+Sox11_Control_CST_TC_merge.anchors <- FindIntegrationAnchors(object.list = Sox11_Control_CST_TC_merge.list,
+                                            anchor.features = features)
+
+Sox11_Control_CST_TC <- IntegrateData(anchorset = Sox11_Control_CST_TC_merge.anchors)
+
+DefaultAssay(Sox11_Control_CST_TC) <- "integrated"
+
+Sox11_Control_CST_TC <- ScaleData(Sox11_Control_CST_TC, verbose = FALSE)
+
+Sox11_Control_CST_TC <- RunPCA(Sox11_Control_CST_TC, npcs = 50, verbose = FALSE)
+
+Sox11_Control_CST_TC <- RunUMAP(Sox11_Control_CST_TC, reduction = "pca", dims = 1:30)
+
+Sox11_Control_CST_TC <- FindNeighbors(Sox11_Control_CST_TC, reduction = "pca", dims = 1:30)
+
+Sox11_Control_CST_TC <- FindClusters(Sox11_Control_CST_TC, resolution = 0.5)
+
+DefaultAssay(Sox11_Control_CST_TC) <- "RNA"
+
+Sox11_Control_CST_TC
+
+#Indicates 8324
+
+#cluster the merged data. 
+
+Sox11_Control_CST_TC <- NormalizeData(Sox11_Control_CST_TC, normalization.method = "LogNormalize", scale.factor = 10000)
+
+Sox11_Control_CST_TC <- FindVariableFeatures(Sox11_Control_CST_TC, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(Sox11_Control_CST_TC)
+
+Sox11_Control_CST_TC <- ScaleData(Sox11_Control_CST_TC, features = all.genes)
+
+Sox11_Control_CST_TC <- RunPCA(Sox11_Control_CST_TC, features = VariableFeatures(object = Sox11_Control_CST_TC), npcs = 100)
+
+Sox11_Control_CST_TC <- FindNeighbors(Sox11_Control_CST_TC, dims = 1:30)
+
+Sox11_Control_CST_TC <- FindClusters(Sox11_Control_CST_TC, resolution = 0.5)
+
+Sox11_Control_CST_TC <- RunUMAP(Sox11_Control_CST_TC, dims = 1:30)
+
+#A Dimplot for initial visualization
+DimPlot(Sox11_Control_CST_TC, reduction = "umap", label = TRUE, pt.size = 1, label.size = 10
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text (size = 20)) #2880 x 1500
+
+
+######################################################################################################################
+# De-multiplex the four time points using barcodes associated with each
+######################################################################################################################
+
+#Add the PERCENT of total reads that come from each barcode to metadata. 
+#Note that "sponge" barcode sequence, which contains the backbone of the barcode construct but not
+#any barcode region, is added. This allows sequences that lack the barcode proper to match perfectly
+#to the decoy, preventing erroneous assignment of partial sequences (i.e. give partial reads that include
+#AAV-Malat but lack barcode a place to go rather than risk false assignment)
+
+PercentageFeatureSet(Sox11_Control_CST_TC,pattern="BRCD.102.226") -> Sox11_Control_CST_TC$BRCD.102
+
+PercentageFeatureSet(Sox11_Control_CST_TC,pattern="BRCD.SPNG.160") -> Sox11_Control_CST_TC$BRCD.SPNG
+
+PercentageFeatureSet(Sox11_Control_CST_TC,pattern="BRCD.00.150") -> Sox11_Control_CST_TC$BRCD.00
+
+PercentageFeatureSet(Sox11_Control_CST_TC,pattern="BRCD.01.140") -> Sox11_Control_CST_TC$BRCD.01
+
+PercentageFeatureSet(Sox11_Control_CST_TC,pattern="BRCD.03.140") -> Sox11_Control_CST_TC$BRCD.03
+
+
+#Export metadata.
+
+write.csv(x = Sox11_Control_CST_TC@meta.data,
+          file = "2_Output_Files/Sox11_Control_CST_TC_MD_merge.csv",
+          quote = FALSE)
+
+#In excel, use the relative barcode abundance to 
+#1) add a column named "Timepoint" that indicates time of dissection or Control (or "ambiguous" if barcodes are too
+#low or conflict).
+#2)Place "CellID" as the title of column containing the 10X barcode ID (usually first column)
+#Save the result in 3_Input_Files with an "_back" added (save as .csv)
+
+#The following commands read the csv file back into R, indicate the column that contains the cell identifier, and the inputs the data from the uploaded file into metadata.
+
+Sox11_Control_CST_TC_Timepoint <- read.csv("Input_Files/Sox11_Control_CST_TC_MD_merge_back.csv", sep = ",")
+
+rownames(Sox11_Control_CST_TC_Timepoint) <- Sox11_Control_CST_TC_Timepoint$CellID
+
+Sox11_Control_CST_TC <- AddMetaData(object = Sox11_Control_CST_TC, metadata = Sox11_Control_CST_TC_Timepoint)
+
+#Check that it all worked:
+
+Idents (Sox11_Control_CST_TC) <- "Timepoint"
+
+levels (Sox11_Control_CST_TC)
+
+saveRDS(Sox11_Control_CST_TC, "4_RDS_Files/Sox11_Control_CST_TC.rds")
+
+############################################################################
+#DEG ANALYSIS#
+############################################################################
+
+#Open rds if starting from this point.
+setwd("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_1")
+Sox11_Control_CST_TC <- readRDS("4_RDS_Files/Sox11_Control_CST_TC.rds")
+
+# A JoinLayers command is required in Seurat v5
+
+Sox11_Control_CST_TC[["RNA"]] <- JoinLayers(Sox11_Control_CST_TC[["RNA"]])
+
+Idents(Sox11_Control_CST_TC) <- "seurat_clusters"
+
+levels(Sox11_Control_CST_TC)
+
+#Compare the whole Sox11 cluster to the whole control cluster 
+
+Sox11_CST_TC_Sox11_v_Control <- FindMarkers(Sox11_Control_CST_TC,
+                                  ident.1 = c("0","1"),
+                                  ident.2 = c("2","3","4","5"),
+                                  logfc.threshold = 0,
+                                  min.pct = 0.001)
+
+write.csv(x = Sox11_CST_TC_Sox11_v_Control,
+          file = "2_Output_Files/Sox11_CST_TC_Sox11_v_Control.csv",
+          quote = FALSE)
+
+Idents (Sox11_Control_CST_TC) <- "Timepoint"
+
+levels (Sox11_Control_CST_TC)
+
+#1 week vs. Control
+Sox11_CST_TC_1wk_v_Control <- FindMarkers(Sox11_Control_CST_TC,
+                             ident.1 = c("1_Week"),
+                             ident.2 = c("Control"),
+                             logfc.threshold = 0,
+                             min.pct = 0.001)
+
+write.csv(x = Sox11_CST_TC_1wk_v_Control,
+          file = "2_Output_Files/SOX11_1wk_v_Control.csv",
+          quote = FALSE)
+
+
+#1 week vs. 2 weeks
+Sox11_CST_TC_1wk_v_2wk <- FindMarkers(Sox11_Control_CST_TC,
+                                          ident.1 = c("1_Week"),
+                                          ident.2 = c("2_Weeks"),
+                                          logfc.threshold = 0,
+                                          min.pct = 0.001)
+
+write.csv(x = Sox11_CST_TC_1wk_v_2wk,
+          file = "2_Output_Files/SOX11_1wk_v_2wk.csv",
+          quote = FALSE)
+
+
+#1 week vs. 4 weeks
+Sox11_CST_TC_1wk_v_4wk <- FindMarkers(Sox11_Control_CST_TC,
+                                      ident.1 = c("1_Week"),
+                                      ident.2 = c("4_Weeks"),
+                                      logfc.threshold = 0,
+                                      min.pct = 0.001)
+
+write.csv(x = Sox11_CST_TC_1wk_v_4wk,
+          file = "2_Output_Files/SOX11_1wk_v_4wk.csv",
+          quote = FALSE)
+
+#1 week vs. 6 weeks
+Sox11_CST_TC_1wk_v_6wk <- FindMarkers(Sox11_Control_CST_TC,
+                                      ident.1 = c("1_Week"),
+                                      ident.2 = c("6_Weeks"),
+                                      logfc.threshold = 0,
+                                      min.pct = 0.001)
+
+write.csv(x = Sox11_CST_TC_1wk_v_6wk,
+          file = "3_Output_Files/SOX11_1wk_v_6wk.csv",
+          quote = FALSE)
+
+#2 weeks vs. Control
+Sox11_CST_TC_2wk_v_Control <- FindMarkers(Sox11_Control_CST_TC,
+                                      ident.1 = c("2_Weeks"),
+                                      ident.2 = c("Control"),
+                                      logfc.threshold = 0,
+                                      min.pct = 0.001)
+
+write.csv(x = Sox11_CST_TC_2wk_v_Control,
+          file = "2_Output_Files/SOX11_2wk_v_Control.csv",
+          quote = FALSE)
+
+
+#2 weeks vs. 4 weeks
+Sox11_CST_TC_2wk_v_4wk <- FindMarkers(Sox11_Control_CST_TC,
+                                          ident.1 = c("2_Weeks"),
+                                          ident.2 = c("4_Weeks"),
+                                          logfc.threshold = 0,
+                                          min.pct = 0.001)
+
+write.csv(x = Sox11_CST_TC_2wk_v_4wk,
+          file = "2_Output_Files/SOX11_2wk_v_4wk.csv",
+          quote = FALSE)
+
+#2 weeks vs. 6 weeks
+Sox11_CST_TC_2wk_v_6wk <- FindMarkers(Sox11_Control_CST_TC,
+                                      ident.1 = c("2_Weeks"),
+                                      ident.2 = c("6_Weeks"),
+                                      logfc.threshold = 0,
+                                      min.pct = 0.001)
+
+write.csv(x = Sox11_CST_TC_2wk_v_6wk,
+          file = "2_Output_Files/SOX11_2wk_v_6wk.csv",
+          quote = FALSE)
+
+#4 weeks vs. Control
+Sox11_CST_TC_4wk_v_Control <- FindMarkers(Sox11_Control_CST_TC,
+                                      ident.1 = c("4_Weeks"),
+                                      ident.2 = c("Control"),
+                                      logfc.threshold = 0,
+                                      min.pct = 0.001)
+
+
+write.csv(x = Sox11_CST_TC_4wk_v_Control,
+          file = "2_Output_Files/SOX11_4wk_v_Control.csv",
+          quote = FALSE)
+
+
+#4 weeks vs. 6 weeks
+Sox11_CST_TC_4wk_v_6wk <- FindMarkers(Sox11_Control_CST_TC,
+                                          ident.1 = c("4_Weeks"),
+                                          ident.2 = c("6_Weeks"),
+                                          logfc.threshold = 0,
+                                          min.pct = 0.001)
+
+write.csv(x = Sox11_CST_TC_4wk_v_6wk,
+          file = "2_Output_Files/SOX11_4wk_v_6wk.csv",
+          quote = FALSE)
+
+
+#6 weeks vs. Control
+Sox11_CST_TC_6wk_v_Control <- FindMarkers(Sox11_Control_CST_TC,
+                                          ident.1 = c("6_Weeks"),
+                                          ident.2 = c("Control"),
+                                          logfc.threshold = 0,
+                                          min.pct = 0.001)
+
+write.csv(x = Sox11_CST_TC_6wk_v_Control,
+          file = "2_Output_Files/SOX11_6wk_v_Control.csv",
+          quote = FALSE)
+
+##############################################################################
+#FIGURE GENERATION
+##############################################################################
+setwd("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_1/5_Figures")
+
+
+#############################################################################
+#Figure_1_B - Dimplot
+##############################################################################
+
+#Generate barcode Dimplot to visualize Sox11 treatments.
+#There are six possible values in the Timepoints slot: 1_Week, 2_Weeks,4_Weeks,6_Weeks, Control, and Ambiguous
+#In the Dimplot, when assigned colors they are displayed be default in the following order:
+#Ambiguous,4_Weeks,2_Weeks,1_Week,6_Weeks,Control
+#This allows colors to be assigned to each Timepoint by inserting the color command in the correct position
+#The colors used are as follow:
+# 1_Week = lightpink
+# 2_Weeks = plum1
+# 4_Weeks = purple
+# 6_Weeks = purple4
+# Control and ambiguous = "grey"
+
+Idents(Sox11_Control_CST_TC) <- "Timepoint"
+
+levels(Sox11_Control_CST_TC)
+
+#Change colors for timepoints for visualization 
+
+#1 week 
+DimPlot(Sox11_Control_CST_TC, reduction = "umap", label = FALSE, pt.size = 1, 
+        label.size = 0, group.by =  "Timepoint", alpha = 0.6, cols = c("grey","grey",
+                                                                       "grey","lightpink1",
+                                                                       "grey","grey"),
+        order = FALSE
+) + NoLegend() + NoAxes() 
+ggsave("Figure_1B_1wk.png",height = 4,width = 4,dpi = 300,units = "in")
+
+
+#2 week 
+DimPlot(Sox11_Control_CST_TC, reduction = "umap", label = FALSE, pt.size = 1, 
+        label.size = 0, group.by =  "Timepoint", alpha = 0.6, cols = c("grey","grey",
+                                                                       "plum1","grey",
+                                                                       "grey","grey"),
+        order = FALSE
+) + NoLegend() + NoAxes() 
+ggsave("Figure_1B_2wk.png",height = 4,width = 4,dpi = 300,units = "in")
+
+#4 week 
+DimPlot(Sox11_Control_CST_TC, reduction = "umap", label = FALSE, pt.size = 1, 
+        label.size = 0, group.by =  "Timepoint", alpha = 0.6, cols = c("grey","purple",
+                                                                       "grey","grey",
+                                                                       "grey","grey"),
+        order = FALSE
+) + NoLegend() + NoAxes() 
+ggsave("Figure_1B_4wk.png",height = 4,width = 4,dpi = 300,units = "in")
+
+
+#6 week 
+DimPlot(Sox11_Control_CST_TC, reduction = "umap", label = FALSE, pt.size = 1, 
+        label.size = 0, group.by =  "Timepoint", alpha = 0.6, cols = c("grey","grey",
+                                                                       "grey","grey",
+                                                                       "purple4","grey"),
+        order = FALSE
+) + NoLegend() + NoAxes() 
+ggsave("Figure_1B_6wk.png",height = 4,width = 4,dpi = 300,units = "in")
+
+#########################################################
+#Figure_1C - MA plots
+#########################################################
+
+
+
+#input DEG data (# file not in use)
+
+#Sox11_CST_TC_data <- read.csv("SOX11_1wk_v_Control_MA.csv")
+#Sox11_CST_TC_data <- read.csv("SOX11_2wk_v_Control_MA.csv")
+#Sox11_CST_TC_data <- read.csv("SOX11_4wk_v_Control_MA.csv")
+Sox11_CST_TC_data <- read.csv("SOX11_6wk_v_Control_MA.csv")
+
+plot_data <- Sox11_CST_TC_data %>%
+  filter(!grepl("Rik", X), !grepl("^Gm", X),!grepl("Grik", X))
+
+#Select genes to label in the plot
+
+plot_data$mark <- ''  # Reset the column
+
+#selected Gene list
+specific_genes = c("Dpysl3", "Dpysl5","Tubb2b","Tuba1a",
+                   "Marcksl1","Dcx", "Ezh2")
+
+#Set text sizes
+inset_text <- 0
+axis_text_size <- 20
+axis_label_size <- 20
+gene_label_size <- 8
+
+plot_data$mark[plot_data$X %in% specific_genes] <- 'specific_gene'
+plot_data$average_expression <- rowMeans(plot_data[,c("pct.1", "pct.2")])
+plot_data$color <- ifelse(plot_data$avg_log2FC >1 & plot_data$p_val_adj > 0.05, "grey", 
+                          ifelse(plot_data$avg_log2FC >1 & plot_data$p_val_adj < 0.05, "green",
+                                 ifelse(plot_data$avg_log2FC < -1 & plot_data$p_val_adj < 0.05, "red",
+                                        "grey")))
+num_upregulated <- sum(plot_data$avg_log2FC > 1 & plot_data$p_val_adj < 0.05)
+num_downregulated <- sum(plot_data$avg_log2FC < -1 & plot_data$p_val_adj < 0.05)
+
+ma_plot <- ggplot(plot_data, aes(x=average_expression, y=avg_log2FC, color=color)) +
+  geom_point(alpha=0.5) +
+  geom_point(data=plot_data[plot_data$mark == 'specific_gene',], aes(x=average_expression, y=avg_log2FC), color="black", size=3, shape=21, fill=plot_data[plot_data$mark == 'specific_gene',]$color) +  # Add bordered points for specific genes
+  geom_text_repel(data = plot_data[plot_data$X %in% specific_genes, ], aes(label = X, x = average_expression, y = avg_log2FC), size=gene_label_size, box.padding = .5, point.padding = 0.5, segment.color = 'black',color = "black") +  # Use ggrepel
+  scale_color_identity() +
+  geom_hline(yintercept = 0, color="black", alpha=0.7, linetype="dashed") +
+  geom_hline(yintercept = 1, color="green", linetype="dashed") +
+  geom_hline(yintercept = -1, color="red", linetype="dashed") +
+  xlab(expression(bold("Average Expression"))) + ylab(expression(bold("Log2 Fold Change"))) +
+  theme_few() +
+  theme(axis.text = element_text(size = axis_text_size)) +
+  theme(axis.title = element_text(size = axis_label_size)) +
+  scale_y_continuous(limits=c(-10, 10), breaks=seq(-10, 10, by=2)) +
+  annotate("text", x = Inf, y = Inf, label = paste("Upregulated:", num_upregulated, "\nDownregulated:", num_downregulated), vjust=1.05, hjust=1.05, size=inset_text, color="black")
+print(ma_plot)
+#ggsave("Figure_1C_1week.png",height = 7,width = 6,dpi = 300,units = "in",bg = "white")
+#ggsave("Figure_1C_2weeks.png",height = 7,width = 6,dpi = 300,units = "in",bg = "white")
+#ggsave("Figure_1C_4weeks.png",height = 7,width = 6,dpi = 300,units = "in",bg = "white")
+ggsave("Figure_1C_6weeks.png",height = 7,width = 6,dpi = 300,units = "in",bg = "white")
+
+
+#########################################################
+#Figure_1D_GO_Enrichment_Upregulated
+#########################################################
+setwd("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_1/5_Figures")
+
+#Select the input list
+go_input = read.csv("Sox11_CST_TC_Sox11_v_Control_GO_Input.csv")
+
+#Filter the input list - the "Rik" and other filters should not be needed, but the log2FC and p_val are important
+go_input = go_input %>% filter(!grepl("Rik", X), !grepl("^Gm", X),!grepl("Grik", X),
+                               !grepl("CAG", X),!grepl("H2B", X),!grepl("80B", X),!grepl("BC0", X),
+                               !grepl("AAV", X))
+
+#Set thresholds for GO analysis 
+
+#Upregulated first(adjust the vales for the up and downregulated) 
+
+go_input = go_input %>% filter(go_input$avg_log2FC > 1 & go_input$p_val_adj < 0.05 & pct.1 > 0.03) 
+
+#Translate gene symbols into EntrizID
+my.symbols = go_input$X
+Entrezid=AnnotationDbi::select(org.Mm.eg.db, keys = my.symbols,columns = c("ENTREZID", "SYMBOL"),keytype = "SYMBOL") # converting your gene name to ENTREZID
+Entrez_annotation=Entrezid$ENTREZID #extrating only your entrezid for the input
+genelist=sort(Entrez_annotation,decreasing = TRUE) #sorting the ID
+genelist=na.omit(genelist) # removing the Null values
+
+
+ego=enrichGO(gene = genelist,OrgDb = org.Mm.eg.db,
+             ont = "BP", readable = TRUE, minGSSize = 3, maxGSSize = 1500,pvalueCutoff = 0.05)
+
+write.csv(ego,"Sox11vControl_GO_UP_Output_pct.csv")
+
+data=read.csv ("Sox11vControl_GO_UP_Output_pct.csv")
+
+data = data %>%
+  mutate(Gene_Ratio = as.numeric(sub("(.*)/.*", "\\1", GeneRatio)) / 
+           as.numeric(sub(".*/(.*)", "\\1", GeneRatio)))
+processed_data <- data %>%
+  #filter(ONTOLOGY == "BP") %>%
+  arrange(p.adjust, desc(Count))
+processed_data=head(processed_data,10)
+
+#Plot data.
+
+ggplot(processed_data, aes(x = Gene_Ratio, y = reorder(Description, Gene_Ratio), size = Count, color = p.adjust)) +
+  geom_point(alpha = 0.7) +
+  scale_color_viridis(option = "D") + # color D for Up-regulated and F for Down-regulated
+  theme_classic() +
+  theme(text = element_text(color = "black", size = 15,face = "bold"), #family = "Times New Roman"),
+        axis.text.y = element_text(color = "black",size = 20), # Adjust text alignment and size as needed
+        axis.title = element_text(color = "black"),
+        axis.text.x = element_text(color = "black",angle = 90),
+        legend.title = element_text(color = "black"),
+        legend.text = element_text(color = "black")) +
+  labs(title = "",
+       x = "Gene Ratio",
+       y = "",
+       color = "P-adjust Value",
+       size = "Count")+
+  scale_y_discrete(labels = label_wrap_gen(width = 35))
+ggsave("Figure_1D_GO_Upregulated.png",height = 9,width = 9,dpi = 300,units = "in",bg = "white")
+
+#########################################################
+#Figure_1E_GO_Enrichment_Downregulated
+#########################################################
+setwd("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_1/5_Figures")
+#Select the input list
+go_input = read.csv("Sox11_CST_TC_Sox11_v_Control_GO_Input.csv")
+
+#Filter the input list - the "Rik" and other filters should not be needed, but the log2FC and p_val are important
+go_input = go_input %>% filter(!grepl("Rik", X), !grepl("^Gm", X),!grepl("Grik", X),
+                               !grepl("CAG", X),!grepl("H2B", X),!grepl("80B", X),!grepl("BC0", X),
+                               !grepl("AAV", X))
+
+#Set thresholds for GO analysis 
+
+go_input = go_input %>% filter(go_input$avg_log2FC < -1 & go_input$p_val_adj < 0.05 & pct.2 > .03)
+
+#Translate gene symbols into EntrizID
+my.symbols = go_input$X
+Entrezid=AnnotationDbi::select(org.Mm.eg.db, keys = my.symbols,columns = c("ENTREZID", "SYMBOL"),keytype = "SYMBOL") # converting your gene name to ENTREZID
+Entrez_annotation=Entrezid$ENTREZID #extrating only your entrezid for the input
+genelist=sort(Entrez_annotation,decreasing = TRUE) #sorting the ID
+genelist=na.omit(genelist) # removing the Null values
+
+
+ego=enrichGO(gene = genelist,OrgDb = org.Mm.eg.db,
+             ont = "BP", readable = TRUE, minGSSize = 3, maxGSSize = 1000,pvalueCutoff = 0.05)
+
+
+write.csv(ego,"Sox11vControl_GO_DOWN_Output.csv")
+data=read.csv ("Sox11vControl_GO_DOWN_Output.csv")
+
+
+data = data %>%
+  mutate(Gene_Ratio = as.numeric(sub("(.*)/.*", "\\1", GeneRatio)) / 
+           as.numeric(sub(".*/(.*)", "\\1", GeneRatio)))
+processed_data <- data %>%
+  #filter(ONTOLOGY == "BP") %>%
+  arrange(p.adjust, desc(Count))
+processed_data=head(processed_data,10)
+
+#plot data
+library(ggplot2)
+library(viridis)
+ggplot(processed_data, aes(x = Gene_Ratio, y = reorder(Description, Gene_Ratio), size = Count, color = p.adjust)) +
+  geom_point(alpha = 0.7) +
+  scale_color_viridis(option = "F") + # color D for Up-regulated and F for Down-regulated
+  theme_classic() +
+  theme(text = element_text(color = "black", size = 15,face = "bold"), #family = "Times New Roman"),
+        axis.text.y = element_text(color = "black",size = 20), # Adjust text alignment and size as needed
+        axis.title = element_text(color = "black"),
+        axis.text.x = element_text(color = "black",angle = 90),
+        legend.title = element_text(color = "black"),
+        legend.text = element_text(color = "black")) +
+  labs(title = "",
+       x = "Gene Ratio",
+       y = "",
+       color = "P-adjust Value",
+       size = "Count")+
+  scale_y_discrete(labels = label_wrap_gen(width = 35))
+ggsave("Figure_1E_GO_Downregulated.png",height = 9,width = 9,dpi = 300,units = "in",bg = "white")
+
+
+
