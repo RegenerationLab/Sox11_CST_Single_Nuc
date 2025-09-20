@@ -1,0 +1,608 @@
+###########################################
+#Overview
+###########################################
+#The source files for this script are available through NCBI GEO: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE308576
+
+#The script assumes a file structure as follows:
+# 1_Source_Files_[input library namer here] holds the genes, barcodes, and matrix files
+# 2_Output_Files will hold any data created by the script (for example csv reports of DEGs)
+# 3_Input_Files will hold any csv files that are called by the script
+# 5_Figures will hold the figure outputs
+
+# It is recommended that you make a top-level folder, and within that make subfolders with the exact names from above
+# Then modify the setwd (First command, below) to assign that top level folder to be the working directory
+
+#This script inputs data from four libraries:
+# Uninjured, Control-treated CST neurons
+# Uninjured, Sox11-treated CST neurons
+# Chronically injured, control-treated CST neurons
+# Chornically injured, Sox11-treated CST neurons
+
+#It performs QC, combines and normalizes the files, then assigns identity to clusters based on molecular barcodes.
+#The script generates images for Figure 3, associated data, and supplementary data. 
+#This script was run on R version 4.4.3
+
+# Load libraries
+library('Seurat')
+library('ggplot2')
+library('dplyr')
+library('devtools')
+library('viridis')
+library('org.Mn.eg.db')
+library('clusterProfiler')
+library('ggrepel')
+library('ggthemes')
+
+
+#Set working directory (will change based on user).
+
+setwd("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_3")
+
+##########################################################################
+#Load Data from Uninjured, Control-treated CST neurons
+##########################################################################
+#These data are identical to those used in Figure 1. The commands below essentially recreate the rds file but can
+#be skipped by simply activating the following command and loading the previously created RDS (see "Figure_1_Sox11_CST_TC" script for details)
+
+#Uninjured_Control <- readRDS("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_1/4_RDS_Files/CST_Control_11_24.rds")
+
+CST_Control_11_24.data <- Read10X(data.dir = "1_Source_Files_Uninjured_Control")
+CST_Control_11_24 <- CreateSeuratObject(counts = CST_Control_11_24.data, project = "CST_Control_11_24", 
+                                        min.cells = 3, min.features = 1000)
+CST_Control_11_24
+
+# Initially 4025 nuclei
+
+VlnPlot(CST_Control_11_24, features = c("nFeature_RNA"))
+CST_Control_11_24 <- subset(CST_Control_11_24, subset = nFeature_RNA > 1000 & nFeature_RNA < 8000)
+CST_Control_11_24
+
+# 4022 remain
+
+#Cluster
+
+CST_Control_11_24 <- NormalizeData(CST_Control_11_24, normalization.method = "LogNormalize", scale.factor = 10000)
+
+CST_Control_11_24 <- FindVariableFeatures(CST_Control_11_24, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(CST_Control_11_24)
+
+CST_Control_11_24 <- ScaleData(CST_Control_11_24, features = all.genes)
+
+CST_Control_11_24 <- RunPCA(CST_Control_11_24, features = VariableFeatures(object = CST_Control_11_24), npcs = 100)
+
+CST_Control_11_24 <- FindNeighbors(CST_Control_11_24, dims = 1:30)
+
+CST_Control_11_24 <- FindClusters(CST_Control_11_24, resolution = 0.5)
+
+CST_Control_11_24 <- RunUMAP(CST_Control_11_24, dims = 1:30)
+
+#A Dimplot for intial visualization
+DimPlot(CST_Control_11_24, reduction = "umap", label = TRUE, pt.size = 1, label.size = 10
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text (size = 20)) #2880 x 1500
+
+#Detect and exclude any non-CST nuclei
+
+#The strategy is to use pan-cortical markers to determine which clusters are cortical, 
+#then use a combination of positive and negative CST markers to identify any spurious cortical clusters, meaning definitively cortical but not CST
+
+#Pan-cortical markers: Mef2c, Camk2a, Ptk2b, Satb2
+#Positive CST markers: Crym, Fezf2, Bcl6
+#Negative CST markers: Slc30a3 (intracortical), Sulf1 (layer VI)
+
+# A dotplot with the above markers
+
+DotPlot(CST_Control_11_24, features = c("Mef2c", "Camk2a", "Ptk2b", "Satb2", 
+                                        "Crym", "Fezf2", "Bcl6", "Slc30a3", "Sulf1",
+                                        "Bcl11b","Cux2","Dcc","Unc5d"),
+        dot.scale = 4, dot.min = 0) + coord_flip() +
+  theme(axis.text.x = element_text(angle = 0, hjust = .5),
+        axis.text = element_text(size = 10)) #Sized for display
+
+#Based on this, clusters 5 and 6 are removed as non-CST
+
+CST_Control_11_24 <- subset(CST_Control_11_24, idents = c("5","6"), invert = TRUE)
+
+CST_Control_11_24
+
+#3821 nuclei remain
+
+#recluster the remaining nuclei
+CST_Control_11_24 <- NormalizeData(CST_Control_11_24, normalization.method = "LogNormalize", scale.factor = 10000)
+
+CST_Control_11_24 <- FindVariableFeatures(CST_Control_11_24, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(CST_Control_11_24)
+
+CST_Control_11_24 <- ScaleData(CST_Control_11_24, features = all.genes)
+
+CST_Control_11_24 <- RunPCA(CST_Control_11_24, features = VariableFeatures(object = CST_Control_11_24), npcs = 100)
+
+CST_Control_11_24 <- FindNeighbors(CST_Control_11_24, dims = 1:30)
+
+CST_Control_11_24 <- FindClusters(CST_Control_11_24, resolution = 0.5)
+
+CST_Control_11_24 <- RunUMAP(CST_Control_11_24, dims = 1:30)
+
+#A Dimplot just to get a sense of the cluster distribution
+DimPlot(CST_Control_11_24, reduction = "umap", label = TRUE, pt.size = 1, label.size = 10
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text (size = 20)) #2880 x 1500
+
+
+#Save the resulting object as rds
+saveRDS(CST_Control_11_24, "4_RDS_Files/Uninjured_Control.rds")
+
+##########################################################################
+#Load Data from Uninjured, Sox11-treated CST neurons
+##########################################################################
+#Set working directory
+setwd("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_3")
+
+#Note that the following steps essentially re-create the seurat object
+#for the uninjured CST neurons that was made in Figure 1.
+# As a shortcut, the following commands can be replaced by opening the previously saved Sox11_CST_TC
+
+#Uninjured_Sox11 <- readRDS("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_1/4_RDS_Files/Sox11_CST_TC.rds")
+
+#Step 1: Input data and remove high- and low-count nuclei and cluster.
+#Input uninjured nuclei treated with sox11 
+
+Sox11_CST_TC.data <- Read10X(data.dir = "1_Source_Files_Uninjured_Sox11")
+Sox11_CST_TC <- CreateSeuratObject(counts = Sox11_CST_TC.data, project = "Sox11_CST_TC", 
+                                   min.cells = 3, min.features = 1000)
+Sox11_CST_TC
+
+# Initially 4737 nuclei
+
+VlnPlot(Sox11_CST_TC, features = c("nFeature_RNA"))
+Sox11_CST_TC <- subset(Sox11_CST_TC, subset = nFeature_RNA > 1000 & nFeature_RNA < 8000)
+Sox11_CST_TC
+
+# 4737 remain
+
+#Cluster
+
+Sox11_CST_TC <- NormalizeData(Sox11_CST_TC, normalization.method = "LogNormalize", scale.factor = 10000)
+
+Sox11_CST_TC <- FindVariableFeatures(Sox11_CST_TC, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(Sox11_CST_TC)
+
+Sox11_CST_TC <- ScaleData(Sox11_CST_TC, features = all.genes)
+
+Sox11_CST_TC <- RunPCA(Sox11_CST_TC, features = VariableFeatures(object = Sox11_CST_TC), npcs = 100)
+
+Sox11_CST_TC <- FindNeighbors(Sox11_CST_TC, dims = 1:30)
+
+Sox11_CST_TC <- FindClusters(Sox11_CST_TC, resolution = 0.5)
+
+Sox11_CST_TC <- RunUMAP(Sox11_CST_TC, dims = 1:30)
+
+#A Dimplot for initial visualization
+DimPlot(Sox11_CST_TC, reduction = "umap", label = TRUE, pt.size = 1, label.size = 10
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text (size = 20)) #2880 x 1500
+
+
+#Detect and exclude any non-CST nuclei
+
+#The strategy is to use pan-cortical markers to determine which clusters are cortical, 
+# then use a combination of positive and negative CST markers to identify any spurious cortical clusters,
+# meaning definitively cortical but not CST
+
+#Pan-cortical markers: Mef2c, Camk2a, Ptk2b, Satb2
+#Positive CST markers: Crym, Fezf2, Bcl6, Bcl11b
+#Negative CST markers: Slc30a3 (intracortical), Sulf1 (layer VI), Cux2 (shallow layer)
+
+# A dotplot with the above markers
+
+DotPlot(Sox11_CST_TC, features = c("Mef2c", "Camk2a", "Ptk2b", "Satb2", 
+                                   "Crym", "Fezf2", "Bcl6", "Slc30a3", "Sulf1",
+                                   "Bcl11b","Cux2","Dcc","Unc5d"),
+        dot.scale = 4, dot.min = 0) + coord_flip() +
+  theme(axis.text.x = element_text(angle = 0, hjust = .5),
+        axis.text = element_text(size = 10)) #Sized for display
+
+#Based on this, clusters 5 and 6 are removed as non-CST
+
+Sox11_CST_TC <- subset(Sox11_CST_TC, idents = c("5","6"), invert = TRUE)
+
+Sox11_CST_TC
+
+#4503 nuclei remain
+
+#recluster the remaining nuclei
+Sox11_CST_TC <- NormalizeData(Sox11_CST_TC, normalization.method = "LogNormalize", scale.factor = 10000)
+
+Sox11_CST_TC <- FindVariableFeatures(Sox11_CST_TC, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(Sox11_CST_TC)
+
+Sox11_CST_TC <- ScaleData(Sox11_CST_TC, features = all.genes)
+
+Sox11_CST_TC <- RunPCA(Sox11_CST_TC, features = VariableFeatures(object = Sox11_CST_TC), npcs = 100)
+
+Sox11_CST_TC <- FindNeighbors(Sox11_CST_TC, dims = 1:30)
+
+Sox11_CST_TC <- FindClusters(Sox11_CST_TC, resolution = 0.5)
+
+Uninjured_Sox11 <- RunUMAP(Sox11_CST_TC, dims = 1:30)
+
+
+#A Dimplot just to get a sense of the cluster distribution
+DimPlot(Uninjured_Sox11, reduction = "umap", label = TRUE, pt.size = 1, label.size = 10
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text (size = 20)) #2880 x 1500
+
+#Save the resulting object as rds
+saveRDS(Uninjured_Sox11, "4_RDS_Files/Uninjured_Sox11.rds")
+
+
+##########################################################################
+#Load Data from Injured, Control-treated CST neurons
+##########################################################################
+
+Chronic_Control_1.data <- Read10X(data.dir = "1_Source_Files_Chronic_Control")
+Chronic_Control_1 <- CreateSeuratObject(counts = Chronic_Control_1.data, project = "Chronic_Control_1", 
+                                        min.cells = 3, min.features = 1000)
+Chronic_Control_1
+
+# Initially 2058 nuclei
+
+VlnPlot(Chronic_Control_1, features = c("nFeature_RNA"))
+Chronic_Control_1 <- subset(Chronic_Control_1, subset = nFeature_RNA > 1000 & nFeature_RNA < 8000)
+Chronic_Control_1
+
+# 2042 remain
+
+#Cluster
+
+Chronic_Control_1 <- NormalizeData(Chronic_Control_1, normalization.method = "LogNormalize", scale.factor = 10000)
+
+Chronic_Control_1 <- FindVariableFeatures(Chronic_Control_1, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(Chronic_Control_1)
+
+Chronic_Control_1 <- ScaleData(Chronic_Control_1, features = all.genes)
+
+Chronic_Control_1 <- RunPCA(Chronic_Control_1, features = VariableFeatures(object = Chronic_Control_1), npcs = 100)
+
+Chronic_Control_1 <- FindNeighbors(Chronic_Control_1, dims = 1:30)
+
+Chronic_Control_1 <- FindClusters(Chronic_Control_1, resolution = 0.5)
+
+Chronic_Control_1 <- RunUMAP(Chronic_Control_1, dims = 1:30)
+
+#A Dimplot for initial visualization
+DimPlot(Chronic_Control_1, reduction = "umap", label = TRUE, pt.size = 1, label.size = 10
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text (size = 20)) #2880 x 1500
+
+#Detect and exclude any non-CST nuclei
+
+#The strategy is to use pan-cortical markers to determine which clusters are cortical, 
+# then use a combination of positive and negative CST markers to identify any spurious cortical clusters,
+# meaning definitively cortical but not CST
+
+#Pan-cortical markers: Mef2c, Camk2a, Ptk2b, Satb2
+#Positive CST markers: Crym, Fezf2, Bcl6, Bcl11b
+#Negative CST markers: Slc30a3 (intracortical), Sulf1 (layer VI), Cux2 (shallow layer)
+
+# A dotplot with the above markers
+
+DotPlot(Chronic_Control_1, features = c("Mef2c", "Camk2a", "Ptk2b", "Satb2", 
+                                        "Crym", "Fezf2", "Bcl6", "Slc30a3", "Sulf1",
+                                        "Bcl11b","Cux2","Dcc","Unc5d"),
+        dot.scale = 4, dot.min = 0) + coord_flip() +
+  theme(axis.text.x = element_text(angle = 0, hjust = .5),
+        axis.text = element_text(size = 10)) #Sized for display
+
+#Based on this, cluster 4 is removed as non-CST
+
+Chronic_Control_1 <- subset(Chronic_Control_1, idents = c("4"), invert = TRUE)
+
+Chronic_Control_1
+
+#1925 nuclei remain
+
+#recluster the remaining nuclei
+Chronic_Control_1 <- NormalizeData(Chronic_Control_1, normalization.method = "LogNormalize", scale.factor = 10000)
+
+Chronic_Control_1 <- FindVariableFeatures(Chronic_Control_1, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(Chronic_Control_1)
+
+Chronic_Control_1 <- ScaleData(Chronic_Control_1, features = all.genes)
+
+Chronic_Control_1 <- RunPCA(Chronic_Control_1, features = VariableFeatures(object = Chronic_Control_1), npcs = 100)
+
+Chronic_Control_1 <- FindNeighbors(Chronic_Control_1, dims = 1:30)
+
+Chronic_Control_1 <- FindClusters(Chronic_Control_1, resolution = 0.5)
+
+Chronic_Control_1 <- RunUMAP(Chronic_Control_1, dims = 1:30)
+
+#A Dimplot for initial visualization
+DimPlot(Chronic_Control_1, reduction = "umap", label = TRUE, pt.size = 1, label.size = 10
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text (size = 20)) #2880 x 1500
+
+
+#Save the resulting object as rds
+saveRDS(Chronic_Control_1, "4_RDS_Files/Chronic_Control_1.rds")
+
+##########################################################################
+#Load Data from Chronically injured CST neurons that received Sox11
+##########################################################################
+
+Chronic_Sox11_1.data <- Read10X(data.dir = "1_Source_Files_Chronic_Sox11")
+Chronic_Sox11_1 <- CreateSeuratObject(counts = Chronic_Sox11_1.data, project = "Chronic_Sox11_1", 
+                                      min.cells = 3, min.features = 1000)
+Chronic_Sox11_1
+
+# Initially 5494 nuclei
+
+VlnPlot(Chronic_Sox11_1, features = c("nFeature_RNA"))
+Chronic_Sox11_1 <- subset(Chronic_Sox11_1, subset = nFeature_RNA > 1000 & nFeature_RNA < 8000)
+Chronic_Sox11_1
+
+# 5487 remain
+
+#Cluster
+
+Chronic_Sox11_1 <- NormalizeData(Chronic_Sox11_1, normalization.method = "LogNormalize", scale.factor = 10000)
+
+Chronic_Sox11_1 <- FindVariableFeatures(Chronic_Sox11_1, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(Chronic_Sox11_1)
+
+Chronic_Sox11_1 <- ScaleData(Chronic_Sox11_1, features = all.genes)
+
+Chronic_Sox11_1 <- RunPCA(Chronic_Sox11_1, features = VariableFeatures(object = Chronic_Sox11_1), npcs = 100)
+
+Chronic_Sox11_1 <- FindNeighbors(Chronic_Sox11_1, dims = 1:30)
+
+Chronic_Sox11_1 <- FindClusters(Chronic_Sox11_1, resolution = 0.5)
+
+Chronic_Sox11_1 <- RunUMAP(Chronic_Sox11_1, dims = 1:30)
+
+#A Dimplot just to get a sense of the cluster distribution
+DimPlot(Chronic_Sox11_1, reduction = "umap", label = TRUE, pt.size = 1, label.size = 10
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text (size = 20)) #2880 x 1500
+
+
+#Detect and exclude any non-CST nuclei
+
+#The strategy is to use pan-cortical markers to determine which clusters are cortical, 
+# then use a combination of positive and negative CST markers to identify any spurious cortical clusters,
+# meaning definitively cortical but not CST
+
+#Pan-cortical markers: Mef2c, Camk2a, Ptk2b, Satb2
+#Positive CST markers: Crym, Fezf2, Bcl6, Bcl11b
+#Negative CST markers: Slc30a3 (intracortical), Sulf1 (layer VI), Cux2 (shallow layer)
+
+# A dotplot with the above markers
+
+DotPlot(Chronic_Sox11_1, features = c("Mef2c", "Camk2a", "Ptk2b", "Satb2", 
+                                      "Crym", "Fezf2", "Bcl6", "Slc30a3", "Sulf1",
+                                      "Bcl11b","Cux2","Dcc","Unc5d"),
+        dot.scale = 4, dot.min = 0) + coord_flip() +
+  theme(axis.text.x = element_text(angle = 0, hjust = .5),
+        axis.text = element_text(size = 10)) #Sized for display
+
+#Based on this, clusters 5,6, and 7 are removed as non-CST
+
+Chronic_Sox11_1 <- subset(Chronic_Sox11_1, idents = c("5","6","7"), invert = TRUE)
+
+Chronic_Sox11_1
+
+#5111 nuclei remain
+
+#recluster the remaining nuclei
+Chronic_Sox11_1 <- NormalizeData(Chronic_Sox11_1, normalization.method = "LogNormalize", scale.factor = 10000)
+
+Chronic_Sox11_1 <- FindVariableFeatures(Chronic_Sox11_1, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(Chronic_Sox11_1)
+
+Chronic_Sox11_1 <- ScaleData(Chronic_Sox11_1, features = all.genes)
+
+Chronic_Sox11_1 <- RunPCA(Chronic_Sox11_1, features = VariableFeatures(object = Chronic_Sox11_1), npcs = 100)
+
+Chronic_Sox11_1 <- FindNeighbors(Chronic_Sox11_1, dims = 1:30)
+
+Chronic_Sox11_1 <- FindClusters(Chronic_Sox11_1, resolution = 0.5)
+
+Chronic_Sox11_1 <- RunUMAP(Chronic_Sox11_1, dims = 1:30)
+
+#A Dimplot for initial visualization
+DimPlot(Chronic_Sox11_1, reduction = "umap", label = TRUE, pt.size = 1, label.size = 10
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text (size = 20)) #2880 x 1500
+
+#Save the resulting object as rds
+saveRDS(Chronic_Sox11_1, "4_RDS_Files/Chronic_Sox11_1.rds")
+
+
+##########################################################################
+#Merge the four datasets
+##########################################################################
+
+#Open files if starting from this point
+#Uninjured_Control <- readRDS("4_RDS_Files/Uninjured_Control.rds")
+#Uninjured_Sox11 <- readRDS("4_RDS_Files/Uninjured_Sox11.rds")
+#Chronic_Control_1 <- readRDS("4_RDS_Files/Chronic_Control_1.rds")
+#Chronic_Sox11_1 <- readRDS("4_RDS_Files/Chronic_Sox11_1.rds")
+
+
+Sox11_Chronic_merge.list <- list (Chronic_Sox11_1, Chronic_Control_1, Uninjured_Sox11, Uninjured_Control)
+
+Sox11_Chronic_merge.list <- lapply(X=Sox11_Chronic_merge.list, FUN = function(x) {
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+features <- SelectIntegrationFeatures(object.list = Sox11_Chronic_merge.list)
+
+Sox11_Chronic_merge.anchors <- FindIntegrationAnchors(object.list = Sox11_Chronic_merge.list,
+                                            anchor.features = features)
+
+Sox11_Chronic_merge <- IntegrateData(anchorset = Sox11_Chronic_merge.anchors)
+
+DefaultAssay(Sox11_Chronic_merge) <- "integrated"
+
+Sox11_Chronic_merge <- ScaleData(Sox11_Chronic_merge, verbose = FALSE)
+
+Sox11_Chronic_merge <- RunPCA(Sox11_Chronic_merge, npcs = 50, verbose = FALSE)
+
+Sox11_Chronic_merge <- RunUMAP(Sox11_Chronic_merge, reduction = "pca", dims = 1:30)
+
+Sox11_Chronic_merge <- FindNeighbors(Sox11_Chronic_merge, reduction = "pca", dims = 1:30)
+
+Sox11_Chronic_merge<- FindClusters(Sox11_Chronic_merge, resolution = 0.5)
+
+DefaultAssay(Sox11_Chronic_merge ) <- "RNA"
+
+Sox11_Chronic_merge
+
+#Indicates 26026
+
+#cluster the merged nuclei
+Sox11_Chronic_merge  <- NormalizeData(Sox11_Chronic_merge , normalization.method = "LogNormalize", scale.factor = 10000)
+
+Sox11_Chronic_merge  <- FindVariableFeatures(Sox11_Chronic_merge , selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(Sox11_Chronic_merge )
+
+Sox11_Chronic_merge  <- ScaleData(Sox11_Chronic_merge , features = all.genes)
+
+Sox11_Chronic_merge  <- RunPCA(Sox11_Chronic_merge , features = VariableFeatures(object = Sox11_Chronic_merge ), npcs = 100)
+
+Sox11_Chronic_merge  <- FindNeighbors(Sox11_Chronic_merge , dims = 1:30)
+
+Sox11_Chronic_merge  <- FindClusters(Sox11_Chronic_merge , resolution = 0.5)
+
+Sox11_Chronic_merge  <- RunUMAP(Sox11_Chronic_merge , dims = 1:30)
+
+#A Dimplot for initial visualization
+
+#Maroon chronic control 
+#Grey uninjured control
+#Pink uninkured sox11
+#Purple chronic sox11
+
+DimPlot(Sox11_Chronic_merge , reduction = "umap", group.by = ("orig.ident"), cols = c("maroon", "grey", "plum1", "mediumpurple3"),
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20), text = element_text (size = 20)) #2880 x 1500
+
+saveRDS(Sox11_Chronic_merge, "4_RDS_Files/Sox11_Chronic_merge.rds")
+
+############################################################################
+#DEG ANALYSIS#
+############################################################################
+
+#Open RDS if starting from this point
+Sox11_Chronic_merge <- readRDS("4_RDS_Files/Sox11_Chronic_merge.rds")
+
+# A JoinLayers command is required in Seurat v5
+Sox11_Chronic_merge[["RNA"]] <- JoinLayers(Sox11_Chronic_merge[["RNA"]])
+
+
+Idents (Sox11_Chronic_merge) <- 'orig.ident'
+levels (Sox11_Chronic_merge)
+
+
+#All comparisons 
+
+Sox11_Chronic_v_Control <- FindMarkers(Sox11_Chronic_merge,
+                                  ident.1 = c("Chronic_Sox11_1"),
+                                  ident.2 = c("CST_Control_11_24"),
+                                  logfc.threshold = 0,
+                                  min.pct = 0.001)
+
+write.csv(x = Sox11_Chronic_v_Control,
+          file = "2_Output_Files/Sox11_Chronic_v_Control.csv",
+          quote = FALSE)
+
+##############################################################################
+#FIGURE_GENERATION
+##############################################################################
+setwd("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_3/5_Figures")
+
+
+
+##############################################################################
+#FIGURE_3C - Dimplot
+##############################################################################
+
+### Generate Barcode Dimplot and Feature Plot to check Pro-growth Genes ###
+
+DimPlot(Sox11_Chronic_merge , reduction = "umap", group.by = ("orig.ident"), cols = c("maroon", "grey", "plum1", "mediumpurple3"),
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20), text = element_text (size = 20)) #2880 x 1500
+ggsave("Figure_3C_Dimplot.png",height = 4,width = 4,dpi = 300,units = "in")
+
+#########################################################
+#FIGURE_3D MA
+#########################################################
+#Input the DEG data. These data derive from the DEG output above but are filtered to remove non-annotated genes
+# (e.g. RIK, GM)
+
+Sox11_Chronic_v_Control_data <- read.csv("Sox11_Chronic_v_Control_Annotated.csv")
+
+plot_data <-  Sox11_Chronic_v_Control_data%>%
+  filter(!grepl("Rik", X), !grepl("^Gm", X),!grepl("Grik", X))
+
+#Select genes to label in the plot
+
+plot_data$mark <- ''  # Reset the column
+
+#selected Gene list
+specific_genes = c("Dpysl3", "Dpysl5","Tubb2b","Tuba1a",
+                   "Marcksl1","Dcx", "Ezh2")
+
+#Set text sizes
+inset_text <- 12
+axis_text_size <- 26
+axis_label_size <- 26
+gene_label_size <- 12
+
+plot_data$mark[plot_data$X %in% specific_genes] <- 'specific_gene'
+plot_data$average_expression <- rowMeans(plot_data[,c("pct.1", "pct.2")])
+plot_data$color <- ifelse(plot_data$avg_log2FC >1 & plot_data$p_val_adj > 0.05, "grey", 
+                          ifelse(plot_data$avg_log2FC >1 & plot_data$p_val_adj < 0.05, "green",
+                                 ifelse(plot_data$avg_log2FC < -1 & plot_data$p_val_adj < 0.05, "red",
+                                        "grey")))
+num_upregulated <- sum(plot_data$avg_log2FC > 1 & plot_data$p_val_adj < 0.05)
+num_downregulated <- sum(plot_data$avg_log2FC < -1 & plot_data$p_val_adj < 0.05)
+
+ma_plot <- ggplot(plot_data, aes(x=average_expression, y=avg_log2FC, color=color)) +
+  geom_point(alpha=0.5) +
+  geom_point(data=plot_data[plot_data$mark == 'specific_gene',], aes(x=average_expression, y=avg_log2FC), color="black", size=3, shape=21, fill=plot_data[plot_data$mark == 'specific_gene',]$color) +  # Add bordered points for specific genes
+  geom_text_repel(data = plot_data[plot_data$X %in% specific_genes, ], aes(label = X, x = average_expression, y = avg_log2FC), size=gene_label_size, box.padding = .5, point.padding = 0.5, segment.color = 'black',color = "black") +  # Use ggrepel
+  scale_color_identity() +
+  geom_hline(yintercept = 0, color="black", alpha=0.7, linetype="dashed") +
+  geom_hline(yintercept = 1, color="green", linetype="dashed") +
+  geom_hline(yintercept = -1, color="red", linetype="dashed") +
+  xlab(expression(bold("Average Expression"))) + ylab(expression(bold("Log2 Fold Change"))) +
+  theme_few() +
+  theme(axis.text = element_text(size = axis_text_size)) +
+  theme(axis.title = element_text(size = axis_label_size)) +
+  scale_y_continuous(limits=c(-10, 10), breaks=seq(-10, 10, by=2)) +
+  annotate("text", x = Inf, y = Inf, label = paste("Upregulated:", num_upregulated, "\nDownregulated:", num_downregulated), vjust=1.05, hjust=1.05, size=inset_text, color="black")
+print(ma_plot)
+
+ggsave("Figure_3D_MA.png",height = 6,width = 8,dpi = 300,units = "in",bg = "white")
+
+
