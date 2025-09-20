@@ -1,0 +1,218 @@
+
+
+####################################################################
+# Overview
+####################################################################
+#This script is for Gene ontology enrichment analysis of transcripts upregulated by Sox11 in CST, RGC, and epidermal cells and Venn diagram visualization of overlapping transcripts. 
+
+#The Sox11-CST data derive from an intersection of transcripts significantly upregulated in both Sox11_TC_2_Weeks and Chronic_Sox11
+
+#The Sox11-RGC data are taken unaltered from Supplemental Table 1,
+#(Norsworthy et al, Neuron, 94(6), 1112-1120.e4. https://doi.org/10.1016/j.neuron.2017.05.035
+
+#The Sox11-Epidermal data are taken unaltered from Supplemental Data associated with Figure 3A,
+#Miao et al. (2019) Nature Communications, 10(1), 4042. https://doi.org/10.1038/s41467-019-11880-9
+
+#The input files are provided in the same Github subfolder as this script
+
+#The script generates images for Figure 4 and associated data. 
+#This script was run on R version 4.4.3, packages needed are clusterProfiler version 4.12.2, enrichR version 3.4, ggplot2 version 3.5.1, viridisLite version 0.4.2, org.Mm.eg.db version 3.19.1, and eulerr version 7.0.2.  
+
+#If the libraries below are unavailable, use install.packages("missing_library_name") to install it
+
+# Load libraries
+library('enrichR')
+library('clusterProfiler')
+library('org.Mm.eg.db')
+library('eulerr')
+library('ggplot2')
+library('viridisLite')
+library("viridis")
+library("grid")
+
+
+############################################
+#Set working directory
+#########################################
+setwd("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_4")
+
+############################################
+##Generate Figure 4A - VENN
+###########################################
+
+
+#specify values to use in venn diagram
+fit <- euler(c('CST' = 1300,
+               'RGC' = 613,
+               'CST&RGC' = 127))
+
+#create venn diagram with custom colors
+
+venn = plot(fit, fill=c('lightpink3', 'lightblue'),quantities = FALSE,Labels = FALSE) 
+
+grid.draw(venn)
+png("Figure_4A.png",width = 4,height = 4,units = "in",res = 300)  # Start PNG device
+grid.draw(venn)     # Draw the plot on the PNG device
+dev.off()
+
+venn
+
+
+############################################
+##Generate Figure 4B - VENN
+###########################################
+
+#specify values to use in venn diagram
+fit <- euler(c('CST' = 1167,
+               'Epidermal' = 486,
+               'CST&Epidermal' = 260))
+
+#create venn diagram with custom colors
+
+venn = plot(fit, fill=c('lightpink3', 'khaki2'),quantities = FALSE) 
+
+grid.draw(venn)
+png("venn_diagram.png",width = 4,height = 4,units = "in",res = 300)  # Start PNG device
+grid.draw(venn)     # Draw the plot on the PNG device
+dev.off()
+
+venn
+
+############################################
+#FIGIRE 4C - Sox11-CST and Sox11-RGC - Gene Ontology 
+#########################################
+
+
+#Select the input DEG list
+go_input = read.csv("Sox11_CST_RGC_Overlap_Up_Input.csv")
+
+
+#Filter the input list - the "Rik" and other filters should not be needed, but the log2FC and p_val are important
+go_input = go_input %>% filter(!grepl("Rik", X), !grepl("^Gm", X),!grepl("Grik", X),
+                               !grepl("CAG", X),!grepl("H2B", X),!grepl("80B", X),!grepl("BC0", X),
+                               !grepl("AAV", X))
+
+#Set thresholds for GO analysis (adjust the vales for the significantly upregulated transcripts) 
+go_input = go_input %>% filter(go_input$avg_log2FC > 0 & go_input$p_val_adj < 0.05) 
+
+#Translate gene symbols into EntrizID
+my.symbols = go_input$X
+Entrezid=AnnotationDbi::select(org.Mm.eg.db, keys = my.symbols,columns = c("ENTREZID", "SYMBOL"),keytype = "SYMBOL") # converting your gene name to ENTREZID
+GO_annotation=Entrezid$ENTREZID #extrating only your entrezid for the input
+genelist=sort(GO_annotation,decreasing = TRUE) #sorting the ID
+genelist=na.omit(genelist) # removing the Null values
+
+
+#GO analysis 
+ego=enrichGO(gene = genelist,OrgDb = org.Mm.eg.db,
+             ont = "BP", readable = TRUE, minGSSize = 3, maxGSSize = 1500,pvalueCutoff = 0.05)
+
+
+#Process data 
+write.csv(ego,"Sox11_CST_RGC_Overlap_Up_GO_Output.csv")
+data=read.csv ("Sox11_CST_RGC_Overlap_Up_GO_Output.csv")
+
+#data=ego_2@result
+data = data %>%
+  mutate(Gene_Ratio = as.numeric(sub("(.*)/.*", "\\1", GeneRatio)) / 
+           as.numeric(sub(".*/(.*)", "\\1", GeneRatio)))
+processed_data <- data %>%
+  #filter(ONTOLOGY == "BP") %>%
+  arrange(p.adjust, desc(Count))
+write.csv(processed_data,"Z:/Blackmore_Lab/13_Sox11_Manuscript/Fig_4_Intersections/Sox11_Spinal_Epidermal_Overlap_GO_Up_P.csv")
+processed_data=head(processed_data,10)
+
+
+#Plot data
+
+ggplot(processed_data, aes(x = Gene_Ratio, y = reorder(Description, Gene_Ratio), size = Count, color = p.adjust)) +
+  geom_point(alpha = 0.7) +
+  scale_color_viridis(option = "D") + # color D for Up-regulated and F for Down-regulated
+  theme_classic() +
+  theme(text = element_text(color = "black", size = 22,face = "bold"), #family = "Times New Roman"),
+        axis.text.y = element_text(color = "black",size = 21), # Adjust text alignment and size as needed
+        axis.title = element_text(color = "black"),
+        axis.text.x = element_text(color = "black",angle = 90, size = 22),
+        legend.title = element_text(color = "black"),
+        legend.text = element_text(color = "black")) +
+  labs(title = "",
+       x = "Gene Ratio",
+       y = "",
+       color = "P-adjust Value",
+       size = "Count")+
+  scale_y_discrete(labels = label_wrap_gen(width = 25))
+
+ggsave("Fig_4C.png",height = 9.5,width = 8.2,dpi = 300,units = "in",bg = "white")
+
+############################################
+#FIGIRE 4D - CST and Epidermal - Gene Ontology 
+#########################################
+
+#Select the input DEG list
+go_input = read.csv("Sox11_CST_Epidermal_Overlap_Up_Input.csv")
+
+
+#Filter the input list - the "Rik" and other filters should not be needed, but the log2FC and p_val are important
+go_input = go_input %>% filter(!grepl("Rik", X), !grepl("^Gm", X),!grepl("Grik", X),
+                               !grepl("CAG", X),!grepl("H2B", X),!grepl("80B", X),!grepl("BC0", X),
+                               !grepl("AAV", X))
+
+#Set thresholds for GO analysis (adjust the vales for the significantly upregulated transcripts) 
+go_input = go_input %>% filter(go_input$avg_log2FC > 0 & go_input$p_val_adj < 0.05) 
+
+#Translate gene symbols into EntrizID
+my.symbols = go_input$X
+Entrezid=AnnotationDbi::select(org.Mm.eg.db, keys = my.symbols,columns = c("ENTREZID", "SYMBOL"),keytype = "SYMBOL") # converting your gene name to ENTREZID
+GO_annotation=Entrezid$ENTREZID #extrating only your entrezid for the input
+genelist=sort(GO_annotation,decreasing = TRUE) #sorting the ID
+genelist=na.omit(genelist) # removing the Null values
+
+
+#GO analysis 
+ego=enrichGO(gene = genelist,OrgDb = org.Mm.eg.db,
+             ont = "BP", readable = TRUE, minGSSize = 3, maxGSSize = 1500,pvalueCutoff = 0.05)
+
+
+#Process data 
+write.csv(ego,"Sox11_CST_Epidermal_Overlap_Up_GO_Output.csv")
+data=read.csv ("Sox11_CST_Epidermal_Overlap_Up_GO_Output.csv")
+
+#data=ego_2@result
+data = data %>%
+  mutate(Gene_Ratio = as.numeric(sub("(.*)/.*", "\\1", GeneRatio)) / 
+           as.numeric(sub(".*/(.*)", "\\1", GeneRatio)))
+processed_data <- data %>%
+  #filter(ONTOLOGY == "BP") %>%
+  arrange(p.adjust, desc(Count))
+write.csv(processed_data,"Z:/Blackmore_Lab/13_Sox11_Manuscript/Fig_4_Intersections/Sox11_Spinal_Epidermal_Overlap_GO_Up_P.csv")
+processed_data=head(processed_data,10)
+
+
+#Plot data
+
+ggplot(processed_data, aes(x = Gene_Ratio, y = reorder(Description, Gene_Ratio), size = Count, color = p.adjust)) +
+  geom_point(alpha = 0.7) +
+  scale_color_viridis(option = "D") + # color D for Up-regulated and F for Down-regulated
+  theme_classic() +
+  theme(text = element_text(color = "black", size = 22,face = "bold"), #family = "Times New Roman"),
+        axis.text.y = element_text(color = "black",size = 21), # Adjust text alignment and size as needed
+        axis.title = element_text(color = "black"),
+        axis.text.x = element_text(color = "black",angle = 90, size = 22),
+        legend.title = element_text(color = "black"),
+        legend.text = element_text(color = "black")) +
+  labs(title = "",
+       x = "Gene Ratio",
+       y = "",
+       color = "P-adjust Value",
+       size = "Count")+
+  scale_y_discrete(labels = label_wrap_gen(width = 25))
+
+ggsave("Fig_4D.png",height = 9.5,width = 8.2,dpi = 300,units = "in",bg = "white")
+
+
+
+
+
+
+
+
