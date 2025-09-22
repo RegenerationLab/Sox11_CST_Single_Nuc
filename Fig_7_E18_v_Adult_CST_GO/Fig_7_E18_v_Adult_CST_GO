@@ -1,0 +1,205 @@
+###########################################
+#Overview
+###########################################
+##This script creates Venn diagrams and performs is for Gene ontology enrichment analysis
+# of transcripts regulated by Sox11 and development. The input for this script comes
+# from prior scripts that generated DEGs based on Sox11 expression and embryonic development
+
+#The libraries need to run the script are found below. 
+# Load libraries
+library('Seurat')
+library('ggplot2')
+#install.packages("dplyr")
+library('dplyr')
+#install.packages("devtools")
+library('devtools')
+#install.packages("viridis")
+library('viridis')
+library('clusterProfiler')
+#install.packages("eulerr")
+library('eulerr')
+library('ggrepel')
+#install.packages("ggthemes")
+library('ggthemes')
+#install.packages("venn")
+library('venn')
+#install.packages("VennDiagram")
+library('VennDiagram')
+library('BiocManager')
+#BiocManager::install("org.Mm.eg.db", force = TRUE)
+library('org.Mn.eg.db')
+#install.packages("org.Mm.eg.db")
+
+
+
+
+############################################
+#Set Working Directory (will vary by user)
+#########################################
+setwd("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_7")
+
+############################################
+#Generate Figure 7A - Venn
+#########################################
+
+#specify values to use in venn diagram
+fit <- euler(c('Sox11' = 741,
+               'E18' = 712,
+               'Sox11&E18' = 478))
+
+#create venn diagram with custom colors
+
+venn = plot(fit, fill=c('lightgreen', 'lightgreen'),quantities = FALSE, labels = FALSE) 
+
+grid.draw(venn)
+png("Figure_7A_Venn.png",width = 4,height = 4,units = "in",res = 300)  # Start PNG device
+grid.draw(venn)     # Draw the plot on the PNG device
+dev.off()
+
+venn
+
+############################################
+#Generate Figure 7B - Venn - Downregulated
+###########################################
+
+#specify values to use in venn diagram
+fit <- euler(c('Sox11' = 343,
+               'E18' = 1175,
+               'Sox11&E18' = 663))
+
+#create venn diagram with custom colors
+
+venn = plot(fit, fill=c('red', 'red'),quantities = FALSE, labels = FALSE) 
+
+grid.draw(venn)
+png("Figure_7B_Venn.png",width = 4,height = 4,units = "in",res = 300)  # Start PNG device
+grid.draw(venn)     # Draw the plot on the PNG device
+dev.off()
+
+venn
+
+
+############################################
+#Generate Figure 7E - GO enrichment - E18/Sox11-Up intersection
+###########################################
+
+#Select the input list
+go_input = read.csv("E18_v_Sox11_Up_GO_Input.csv")
+
+#Filter the input list - the "Rik" and other filters should not be needed, but the log2FC and p_val are important
+go_input = go_input %>% filter(!grepl("Rik", X), !grepl("^Gm", X),!grepl("Grik", X),
+                               !grepl("CAG", X),!grepl("H2B", X),!grepl("80B", X),!grepl("BC0", X),
+                               !grepl("AAV", X))
+
+#Set thresholds for GO analysis (adjust the vales for the up and downregulated) 
+
+#Upregulated
+go_input = go_input %>% filter(go_input$avg_log2FC > 1 & go_input$p_val_adj < 0.05 & pct.1 > 0.03) 
+
+#Translate gene symbols into EntrizID
+my.symbols = go_input$X
+Entrezid=AnnotationDbi::select(org.Mm.eg.db, keys = my.symbols,columns = c("ENTREZID", "SYMBOL"),keytype = "SYMBOL") # converting your gene name to ENTREZID
+Entrez_annotation=Entrezid$ENTREZID #extrating only your entrezid for the input
+genelist=sort(Entrez_annotation,decreasing = TRUE) #sorting the ID
+genelist=na.omit(genelist) # removing the Null values
+
+ego=enrichGO(gene = genelist,OrgDb = org.Mm.eg.db,
+             ont = "BP", readable = TRUE, minGSSize = 3, maxGSSize = 1500,pvalueCutoff = 0.05)
+
+write.csv(ego,"E18_v_Sox11_Up_GO_Output_pct.csv")
+
+data=read.csv ("E18_v_Sox11_Up_GO_Output_pct.csv")
+
+#data=ego_2@result
+data = data %>%
+  mutate(Gene_Ratio = as.numeric(sub("(.*)/.*", "\\1", GeneRatio)) / 
+           as.numeric(sub(".*/(.*)", "\\1", GeneRatio)))
+processed_data <- data %>%
+  #filter(ONTOLOGY == "BP") %>%
+  arrange(p.adjust, desc(Count))
+
+processed_data=head(processed_data,10)
+
+library(ggplot2)
+library(viridis)
+ggplot(processed_data, aes(x = Gene_Ratio, y = reorder(Description, Gene_Ratio), size = Count, color = p.adjust)) +
+  geom_point(alpha = 0.7) +
+  scale_color_viridis(option = "D") + # color D for Up-regulated and F for Down-regulated
+  theme_classic() +
+  theme(text = element_text(color = "black", size = 20,face = "bold"), #family = "Times New Roman"),
+        axis.text.y = element_text(color = "black",size = 25), # Adjust text alignment and size as needed
+        axis.title = element_text(color = "black"),
+        axis.text.x = element_text(color = "black",angle = 90),
+        legend.title = element_text(color = "black"),
+        legend.text = element_text(color = "black")) +
+  labs(title = "",
+       x = "Gene Ratio",
+       y = "",
+       color = "P-adjust Value",
+       size = "Count")+
+  scale_y_discrete(labels = label_wrap_gen(width = 28))
+ggsave("Figure_7E_GO.png",height = 9,width = 9.5,dpi = 300,units = "in",bg = "white")
+
+
+############################################
+#Generate Figure 7F - GO enrichment - Adult/Sox11-Down intersection
+###########################################
+setwd("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_7")
+
+#Select the input list
+go_input = read.csv("E18_v_Sox11_Down_GO_Input.csv")
+
+#Filter the input list - the "Rik" and other filters should not be needed, but the log2FC and p_val are important
+go_input = go_input %>% filter(!grepl("Rik", X), !grepl("^Gm", X),!grepl("Grik", X),
+                               !grepl("CAG", X),!grepl("H2B", X),!grepl("80B", X),!grepl("BC0", X),
+                               !grepl("AAV", X))
+
+#Set thresholds for GO analysis (adjust the vales for the up and downregulated) 
+
+#Upregulated
+go_input = go_input %>% filter(go_input$avg_log2FC < -1 & go_input$p_val_adj < 0.05 & pct.2 > 0.03) 
+
+#Translate gene symbols into EntrizID
+my.symbols = go_input$X
+Entrezid=AnnotationDbi::select(org.Mm.eg.db, keys = my.symbols,columns = c("ENTREZID", "SYMBOL"),keytype = "SYMBOL") # converting your gene name to ENTREZID
+Entrez_annotation=Entrezid$ENTREZID #extrating only your entrezid for the input
+genelist=sort(Entrez_annotation,decreasing = TRUE) #sorting the ID
+genelist=na.omit(genelist) # removing the Null values
+
+ego=enrichGO(gene = genelist,OrgDb = org.Mm.eg.db,
+             ont = "BP", readable = TRUE, minGSSize = 3, maxGSSize = 1000,pvalueCutoff = 0.05)
+
+write.csv(ego,"E18_v_Sox11_Down_GO_Output.csv")
+
+data=read.csv ("E18_v_Sox11_Down_GO_Output.csv")
+
+#data=ego_2@result
+data = data %>%
+  mutate(Gene_Ratio = as.numeric(sub("(.*)/.*", "\\1", GeneRatio)) / 
+           as.numeric(sub(".*/(.*)", "\\1", GeneRatio)))
+processed_data <- data %>%
+  #filter(ONTOLOGY == "BP") %>%
+  arrange(p.adjust, desc(Count))
+
+processed_data=head(processed_data,10)
+
+library(ggplot2)
+library(viridis)
+ggplot(processed_data, aes(x = Gene_Ratio, y = reorder(Description, Gene_Ratio), size = Count, color = p.adjust)) +
+  geom_point(alpha = 0.7) +
+  scale_color_viridis(option = "F") + # color D for Up-regulated and F for Down-regulated
+  theme_classic() +
+  theme(text = element_text(color = "black", size = 20,face = "bold"), #family = "Times New Roman"),
+        axis.text.y = element_text(color = "black",size = 25), # Adjust text alignment and size as needed
+        axis.title = element_text(color = "black"),
+        axis.text.x = element_text(color = "black",angle = 90),
+        legend.title = element_text(color = "black"),
+        legend.text = element_text(color = "black")) +
+  labs(title = "",
+       x = "Gene Ratio",
+       y = "",
+       color = "P-adjust Value",
+       size = "Count")+
+  scale_y_discrete(labels = label_wrap_gen(width = 28))
+ggsave("Figure_7F_GO.png",height = 9,width = 9.5,dpi = 300,units = "in",bg = "white")
+
