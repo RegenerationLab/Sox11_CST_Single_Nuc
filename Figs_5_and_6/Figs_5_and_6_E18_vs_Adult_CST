@@ -1,0 +1,823 @@
+
+####################################################################
+# Overview
+####################################################################
+#The source files for this script are available through NCBI GEO: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE308576
+
+#The script assumes a file structure as follows:
+# 1_Source_Files_[input library namer here] holds the genes, barcodes, and matrix files
+# 2_Output_Files will hold any data created by the script (for example csv reports of DEGs)
+# 3_Input_Files will hold any csv files that are called by the script
+# 5_Figures will hold the figure outputs
+
+# It is recommended that you make a top-level folder, and within that make subfolders with the exact names from above
+# Then modify the setwd (First command, below) to assign that top level folder to be the working directory
+
+
+
+#This script inputs data from two mixed-cell samples from E18 mouse cortex and one FANS-sorted sample of 
+#retrogradely labeled adult CST nuclei from adult mouse cortex.
+
+#The deep layer glutamatergic cell nuclei are identified and extracted from the E18 data sets
+
+#The adult CST data is examined to remove any off-target cell types
+
+#The E18 and adult CST are then merged and DEGs are detected
+
+
+# Load libraries
+library('Seurat')
+library('ggplot2')
+library('dplyr')
+library('ggrepel')
+library('ggtheme')
+library('scCustomize')
+install.packages('theme_few')
+
+
+########    Set working directory     ###############################
+
+setwd("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_5")
+
+#####################################################################
+#Figure 5#
+#########################################################################################################
+#LOAD E18_1 and identify deep-layer glutamatergic neurons
+#########################################################################################################
+
+E18_1.data <- Read10X(data.dir = "1_Source_Files_E18_1")
+E18_1 <- CreateSeuratObject(counts = E18_1.data, project = "E18_1", 
+                          min.cells = 3, min.features = 200)
+E18_1
+
+#indicates 10514
+
+VlnPlot(E18_1, features = c("nFeature_RNA"))
+
+#Remove nuclei with unusually low or high feature counts
+E18_1 <- subset(E18_1, subset = nFeature_RNA > 800 & nFeature_RNA < 8000)
+E18_1
+
+#7835 remain with 800 cutoff
+
+#Perform standard Seurat normalization and clustering
+
+E18_1 <- NormalizeData(E18_1, normalization.method = "LogNormalize", scale.factor = 10000)
+
+E18_1 <- FindVariableFeatures(E18_1, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(E18_1)
+
+E18_1 <- ScaleData(E18_1, features = all.genes)
+
+E18_1 <- RunPCA(E18_1, features = VariableFeatures(object = E18_1), npcs = 100)
+
+E18_1 <- FindNeighbors(E18_1, dims = 1:30)
+
+E18_1 <- FindClusters(E18_1, resolution = 0.5)
+
+E18_1 <- RunUMAP(E18_1, dims = 1:30)
+
+
+# Visualize initial clustering
+
+DimPlot(E18_1, reduction = "umap", label = TRUE, pt.size = 1, label.size = 15
+) + NoLegend() +
+  theme(axis.text = element_text(size = 35),
+        text = element_text (size = 35)) #Sized for screen
+
+
+# Identify deep-layer glutamatergic neurons
+
+# Sox10 and Pdgfra are markers for oligodendrocyte precursor cells
+# Pax6 and Top2a are markers for neural stem cells that are mitotically active
+# Slc1a3 (EAAT) and Tnc are markers for radial glial cells
+# Rbfox3 (NeuN) is a pan-neural marker
+# Gad2 identifies inhibitory neurons
+# Cux2 identifies shallow layer neurons
+# Bcl11b and Fezf2 mark deeper layer neurons (also inhibitory neurons, but these are excluded via Gad2)
+
+
+DotPlot(E18_1, features = c("Sox10","Pdgfra",
+                            "Pax6", "Top2a",
+                            "Slc1a3","Tnc",
+                            "Rbfox3",
+                            "Gad2",
+                            "Cux2",
+                            "Bcl11b","Fezf2"),
+        dot.scale = 8, dot.min = 0) + coord_flip() +
+  theme(axis.text.x = element_text (angle = 0, hjust = .5 ),
+        axis.text = element_text(size = 25)) #Sized for display
+
+#Some visualizations to double-check the dot plot results
+FeaturePlot(E18_1, c("Slc1a3"), label = FALSE, pt.size = 1,
+            label.size = 13, repel = TRUE, order = FALSE) +
+  theme(axis.text = element_text(size = 40),
+        text = element_text (size = 35)) #1440 x 1000
+
+VlnPlot(E18_1, "Top2a", pt.size = 0) + NoLegend() +
+  theme(axis.text.x = element_text(angle = 0, hjust = .5)) +
+  theme(text = element_text(size = 20)) #1500 x 500
+
+
+#Based on this, clusters 3 and 11 are deep layer glutamatertic neurons
+E18_1_DL <- subset(E18_1, idents = c("3","11"), invert = FALSE)
+
+E18_1_DL
+#941 remain
+
+#Perform standard Seurat normalization and clustering
+
+E18_1_DL <- NormalizeData(E18_1_DL, normalization.method = "LogNormalize", scale.factor = 10000)
+
+E18_1_DL <- FindVariableFeatures(E18_1_DL, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(E18_1_DL)
+
+E18_1_DL <- ScaleData(E18_1_DL, features = all.genes)
+
+E18_1_DL <- RunPCA(E18_1_DL, features = VariableFeatures(object = E18_1_DL), npcs = 100)
+
+E18_1_DL <- FindNeighbors(E18_1_DL, dims = 1:30)
+
+E18_1_DL <- FindClusters(E18_1_DL, resolution = 0.5)
+
+E18_1_DL <- RunUMAP(E18_1_DL, dims = 1:30)
+
+
+# Visualize initial clustering
+
+DimPlot(E18_1_DL, reduction = "umap", label = TRUE, pt.size =3, label.size = 8
+) + NoLegend() +
+  theme(axis.text = element_text(size = 10),
+        text = element_text (size = 10)) #Sized for screen
+
+#Visualize layer markers such as Bcl11b, Fezf2, Cux2 to check for outlier / inappropriate clusters
+
+FeaturePlot(E18_1_DL, c("Cux2"), label = FALSE, pt.size = 2,
+            label.size = 13, repel = TRUE, order = TRUE) +
+  theme(axis.text = element_text(size = 40),
+        text = element_text (size = 35)) #1440 x 1000
+
+E18_1_DL
+# all good and 941 remain
+
+# Save deep layer subset
+saveRDS(E18_1_DL, "4_RDS_Files_E18_1_DL.rds")
+
+
+#########################################################################################################
+#LOAD E18_2 and identify deep-layer glutamatergic neurons
+#########################################################################################################
+
+E18_2.data <- Read10X(data.dir = "1_Source_Files_E18_2")
+E18_2 <- CreateSeuratObject(counts = E18_2.data, project = "E18_2", 
+                            min.cells = 3, min.features = 200)
+E18_2
+
+#indicates 6640
+
+VlnPlot(E18_2, features = c("nFeature_RNA"))
+
+#Remove nuclei with unusually low or high feature counts
+E18_2 <- subset(E18_2, subset = nFeature_RNA > 800 & nFeature_RNA < 6000)
+E18_2
+
+
+#5314 remain with 800 cutoff
+
+#Perform standard Seurat normalization and clustering
+
+E18_2 <- NormalizeData(E18_2, normalization.method = "LogNormalize", scale.factor = 10000)
+
+E18_2 <- FindVariableFeatures(E18_2, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(E18_2)
+
+E18_2 <- ScaleData(E18_2, features = all.genes)
+
+E18_2 <- RunPCA(E18_2, features = VariableFeatures(object = E18_2), npcs = 100)
+
+E18_2 <- FindNeighbors(E18_2, dims = 1:30)
+
+E18_2 <- FindClusters(E18_2, resolution = 0.5)
+
+E18_2 <- RunUMAP(E18_2, dims = 1:30)
+
+
+# Visualize initial clustering
+
+DimPlot(E18_2, reduction = "umap", label = TRUE, pt.size = 1, label.size = 5
+) + NoLegend() +
+  theme(axis.text = element_text(size = 10),
+        text = element_text (size = 10)) #Sized for screen
+
+
+#Check for any artificially low cell count clusters, then remove and recluster if needed
+
+VlnPlot(E18_2, "nFeature_RNA", pt.size = 0) + NoLegend() +
+  theme(axis.text.x = element_text(angle = 0, hjust = .5)) +
+  theme(text = element_text(size = 20)) #1500 x 500
+
+VlnPlot(E18_2, "nCount_RNA", pt.size = 0) + NoLegend() +
+  theme(axis.text.x = element_text(angle = 0, hjust = .5)) +
+  theme(text = element_text(size = 20)) #1500 x 500
+
+#adult cluster check 
+
+VlnPlot(E18_2, "Camk2a", pt.size = 0) + NoLegend() +
+  theme(axis.text.x = element_text(angle = 0, hjust = .5)) +
+  theme(text = element_text(size = 20)) #1500 x 500
+
+
+#All clusters appear equally low, therefore none are removed at this point.
+#Note that clusters 3 12, and 15 derive from adult cortex and also have higher feature counts 
+
+# Identify deep-layer glutamatergic neurons
+
+# Sox10 and Pdgfra are markers for oligodendrocyte precursor cells
+# Pax6 and Top2a are markers for neural stem cells that are mitotically active
+# Slc1a3 (EAAT) and Tnc are markers for radial glial cells
+# Rbfox3 (NeuN) is a pan-neural marker
+# Gad2 identifies inhibitory neurons
+# Cux2 identifies shallow layer neurons
+# Bcl11b and Fezf2 mark deeper layer neurons (also inhibitory neurons, but these are excluded via Gad2)
+# Thrb identifies adult neurons
+
+
+DotPlot(E18_2, features = c("Sox10","Pdgfra",
+                            "Pax6", "Top2a",
+                            "Slc1a3","Tnc",
+                            "Rbfox3",
+                            "Gad2",
+                            "Cux2",
+                            "Bcl11b","Fezf2",
+                            "Thrb"),
+        dot.scale = 8, dot.min = 0) + coord_flip() +
+  theme(axis.text.x = element_text(angle = 0, hjust = .5),
+        axis.text = element_text(size = 10)) #Sized for display
+
+#Some visualizations to double-check the dot plot results
+FeaturePlot(E18_2, c("Gad2"), label = FALSE, pt.size = 1,
+            label.size = 13, repel = TRUE, order = FALSE) +
+  theme(axis.text = element_text(size = 40),
+        text = element_text (size = 40)) #1440 x 1000
+
+VlnPlot(E18_2, "Top2a", pt.size = 0) + NoLegend() +
+  theme(axis.text.x = element_text(angle = 0, hjust = .5)) +
+  theme(text = element_text(size = 20)) #1500 x 500
+
+
+
+#Based on this, clusters 4,8,9,10,14 are embryonic glutamatergic deep layer
+
+
+E18_2_DL <- subset(E18_2, idents = c("4", "8", "9", "10", "14"), invert = FALSE)
+
+E18_2_DL
+#1263 remain
+
+#Perform standard Seurat normalization and clustering
+
+E18_2_DL <- NormalizeData(E18_2_DL, normalization.method = "LogNormalize", scale.factor = 10000)
+
+E18_2_DL <- FindVariableFeatures(E18_2_DL, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(E18_2_DL)
+
+E18_2_DL <- ScaleData(E18_2_DL, features = all.genes)
+
+E18_2_DL <- RunPCA(E18_2_DL, features = VariableFeatures(object = E18_2_DL), npcs = 100)
+
+E18_2_DL <- FindNeighbors(E18_2_DL, dims = 1:30)
+
+E18_2_DL <- FindClusters(E18_2_DL, resolution = 0.5)
+
+E18_2_DL <- RunUMAP(E18_2_DL, dims = 1:30)
+
+
+# Visualize initial clustering
+
+DimPlot(E18_2_DL, reduction = "umap", label = TRUE, pt.size = 3, label.size = 7
+) + NoLegend() +
+  theme(axis.text = element_text(size = 10),
+        text = element_text (size = 10)) #Sized for screen
+
+
+# Check for outlier clusters with layer markers
+
+FeaturePlot(E18_2_DL, c("Bcl11b"), label = FALSE, pt.size = 2,
+            label.size = 13, repel = TRUE, order = TRUE) +
+  theme(axis.text = element_text(size = 40),
+        text = element_text (size = 40)) #1440 x 1000
+
+
+# Save deep layer subset
+saveRDS(E18_2_DL, "4_RDS_Files/E18_2_DL.rds")
+
+
+
+#########################################################################################################
+#LOAD DATA from uninjured, adult CST nuclei and remove any non-CST nuclei
+#########################################################################################################
+
+#Note these data are identical to those used in Figure 1. The commands below essentially recreate the rds file but can
+#be skipped by simply activating the following command and loading the previously created RDS (see "Figure_1_Sox11_CST_TC" script for details)
+
+#CST_Control_11_24 <- readRDS("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_1/4_RDS_Files/CST_Control_11_24.rds")
+
+CST_Control_11_24.data <- Read10X(data.dir = "1_Source_Files_Control")
+
+CST_Control_11_24 <- CreateSeuratObject(counts = CST_Control_11_24.data, project = "CST_Control_11_24", 
+                                        min.cells = 3, min.features = 1000)
+CST_Control_11_24
+
+# Initially 4025 nuclei
+
+VlnPlot(CST_Control_11_24, features = c("nFeature_RNA"))
+
+CST_Control_11_24 <- subset(CST_Control_11_24, subset = nFeature_RNA > 1000 & nFeature_RNA < 8000)
+
+CST_Control_11_24
+
+# 4022 remain
+
+#Cluster
+
+CST_Control_11_24 <- NormalizeData(CST_Control_11_24, normalization.method = "LogNormalize", scale.factor = 10000)
+
+CST_Control_11_24 <- FindVariableFeatures(CST_Control_11_24, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(CST_Control_11_24)
+
+CST_Control_11_24 <- ScaleData(CST_Control_11_24, features = all.genes)
+
+CST_Control_11_24 <- RunPCA(CST_Control_11_24, features = VariableFeatures(object = CST_Control_11_24), npcs = 100)
+
+CST_Control_11_24 <- FindNeighbors(CST_Control_11_24, dims = 1:30)
+
+CST_Control_11_24 <- FindClusters(CST_Control_11_24, resolution = 0.5)
+
+CST_Control_11_24 <- RunUMAP(CST_Control_11_24, dims = 1:30)
+
+#A Dimplot for initial visualization
+
+DimPlot(CST_Control_11_24, reduction = "umap", label = TRUE, pt.size = 1, label.size = 10
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text (size = 20)) #2880 x 1500
+
+
+# Identify and remove non-CST nuclei, then re-cluster.
+#Pan-cortical markers: Mef2c, Camk2a, Ptk2b, Satb2
+#Positive CST markers: Crym, Fezf2, Bcl6, Bcl11b ((also inhibitory neurons, but these are excluded via Gad2))
+#Negative CST markers: Slc30a3 (intracortical), Sulf1 (layer VI), Cux2 (shallow layer)
+
+# A dotplot with the above markers
+
+DotPlot(CST_Control_11_24, features = c("Mef2c", "Camk2a", "Ptk2b", "Satb2", 
+                                        "Crym", "Fezf2", "Bcl6", "Slc30a3", "Sulf1",
+                                        "Bcl11b","Cux2","Dcc","Unc5d"),
+        dot.scale = 4, dot.min = 0) + coord_flip() +
+  theme(axis.text.x = element_text(angle = 0, hjust = .5),
+        axis.text = element_text(size = 10)) #Sized for display
+
+#Based on this, clusters 5 and 6 are removed as non-CST.
+
+CST_Control_11_24 <- subset(CST_Control_11_24, idents = c("5","6"), invert = TRUE)
+
+CST_Control_11_24
+
+#3821 nuclei remain
+
+#recluster the remaining nuclei.
+
+CST_Control_11_24 <- NormalizeData(CST_Control_11_24, normalization.method = "LogNormalize", scale.factor = 10000)
+
+CST_Control_11_24 <- FindVariableFeatures(CST_Control_11_24, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(CST_Control_11_24)
+
+CST_Control_11_24 <- ScaleData(CST_Control_11_24, features = all.genes)
+
+CST_Control_11_24 <- RunPCA(CST_Control_11_24, features = VariableFeatures(object = CST_Control_11_24), npcs = 100)
+
+CST_Control_11_24 <- FindNeighbors(CST_Control_11_24, dims = 1:30)
+
+CST_Control_11_24 <- FindClusters(CST_Control_11_24, resolution = 0.5)
+
+CST_Control_11_24 <- RunUMAP(CST_Control_11_24, dims = 1:30)
+
+#A Dimplot just to get a sense of the cluster distribution
+
+DimPlot(CST_Control_11_24, reduction = "umap", label = TRUE, pt.size = 1, label.size = 10
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text (size = 20)) #2880 x 1500
+
+
+#Save RDS file for subsequent merging and DEG detection
+
+saveRDS(CST_Control_11_24, "4_RDS_Files/CST_Control_11_24.rds")
+
+###########################################################################################
+#MERGE DATA SETS
+###########################################################################################
+#Reload data if starting from this point
+#E18_1_DL <- readRDS("4_RDS_Files/E18_1_DL.rds")
+#E18_2_DL <- readRDS("4_RDS_Files/E18_2_DL.rds")
+#CST_Control_11_24 <- readRDS("4_RDS_Files/CST_Control_11_24.rds")
+
+
+E18_v_Adult_CST.list <- list (CST_Control_11_24, E18_1_DL,E18_2_DL)
+
+E18_v_Adult_CST_merge.list <- lapply(X=E18_v_Adult_CST.list, FUN = function(x) {
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+features <- SelectIntegrationFeatures(object.list = E18_v_Adult_CST_merge.list)
+
+E18_v_Adult_CST_merge.anchors <- FindIntegrationAnchors(object.list = E18_v_Adult_CST_merge.list,
+                                                     anchor.features = features)
+
+E18_v_Adult_CST <- IntegrateData(anchorset = E18_v_Adult_CST_merge.anchors)
+
+DefaultAssay(E18_v_Adult_CST) <- "integrated"
+
+E18_v_Adult_CST <- ScaleData(E18_v_Adult_CST, verbose = FALSE)
+
+E18_v_Adult_CST <- RunPCA(E18_v_Adult_CST, npcs = 50, verbose = FALSE)
+
+E18_v_Adult_CST <- RunUMAP(E18_v_Adult_CST, reduction = "pca", dims = 1:30)
+
+E18_v_Adult_CST <- FindNeighbors(E18_v_Adult_CST, reduction = "pca", dims = 1:30)
+
+E18_v_Adult_CST <- FindClusters(E18_v_Adult_CST, resolution = 0.5)
+
+DefaultAssay(E18_v_Adult_CST) <- "RNA"
+
+E18_v_Adult_CST
+
+#Indicates 6025
+
+#cluster the merged nuclei
+E18_v_Adult_CST <- NormalizeData(E18_v_Adult_CST, normalization.method = "LogNormalize", scale.factor = 10000)
+
+E18_v_Adult_CST <- FindVariableFeatures(E18_v_Adult_CST, selection.method = "vst", nfeatures = 2000)
+
+all.genes <- rownames(E18_v_Adult_CST)
+
+E18_v_Adult_CST <- ScaleData(E18_v_Adult_CST, features = all.genes)
+
+E18_v_Adult_CST <- RunPCA(E18_v_Adult_CST, features = VariableFeatures(object = E18_v_Adult_CST), npcs = 100)
+
+E18_v_Adult_CST <- FindNeighbors(E18_v_Adult_CST, dims = 1:30)
+
+E18_v_Adult_CST <- FindClusters(E18_v_Adult_CST, resolution = 0.5)
+
+E18_v_Adult_CST <- RunUMAP(E18_v_Adult_CST, dims = 1:30)
+
+#A Dimplot for initial visualization
+DimPlot(E18_v_Adult_CST, reduction = "umap", label = TRUE, pt.size = 1, label.size = 10,
+) + NoLegend() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text (size = 20)) #2880 x 1500
+
+#Visualization to check distribution of known age-related transcripts
+# Expected to be enriched in adult: Camk2a, Thrb
+# Expected to be enriched in embryo: Tubb2b, Sox11
+
+FeaturePlot(E18_v_Adult_CST, c("Tubb2b"), split.by = 'orig.ident', label = FALSE, pt.size = 2,
+            label.size = 13, repel = TRUE, order = TRUE) +
+  theme(axis.text = element_text(size = 40),
+        text = element_text (size = 40)) #1440 x 1000
+
+saveRDS(E18_v_Adult_CST, "4_RDS_Files/E18_v_Adult_CST.rds")
+
+############################################################################
+#FIND DEGS
+############################################################################
+
+#Open rds if starting from this point
+E18_v_Adult_CST <- ReadRDS("4_RDS_Files/E18_v_Adult_CST.rds")
+
+# A JoinLayers command is required in Seurat v5 prior to DEG detection
+E18_v_Adult_CST[["RNA"]] <- JoinLayers(E18_v_Adult_CST[["RNA"]])
+
+#It can be useful to check the exact names to be used in the subsequent DEG detection; the following commands provide them
+Idents(E18_v_Adult_CST) <- "orig.ident"
+levels(E18_v_Adult_CST)
+
+
+E18_v_Adult_CST_DEGs <- FindMarkers(E18_v_Adult_CST,
+                                    ident.1 = c("E18_1","E18_2"),
+                                    ident.2 = c("CST_Control_11_24"),
+                                    logfc.threshold = 0,
+                                    min.pct = 0.001)
+
+write.csv(x = E18_v_Adult_CST_DEGs,
+          file = "2_Output_Files/E18_v_Adult_CST_DEGs.csv",
+          quote = FALSE)
+
+
+############################################################################
+#FIND AVERAGE EXPRESSION (IF NEEDED)
+############################################################################
+E18_v_Adult_CST_Average <- AverageExpression(
+  E18_v_Adult_CST,
+  assays = "RNA",  # Specify the assay (e.g., "RNA" for gene expression counts)
+  features = NULL,  # Use all genes (or specify a list)
+  return.seurat = FALSE,
+  group.by = "orig.ident",
+  layer = "counts",  # Ensure it uses raw counts (if applicable)
+  verbose = TRUE)
+
+
+write.csv(x = E18_v_Adult_CST_Average,
+          file = "2_Output_Files/E18_v_Adult_CST_Average_Expression.csv",
+          quote = FALSE)
+
+############################################################################
+#Figure Generation
+############################################################################
+setwd("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_5/5_Figures")
+
+
+
+############################################################################
+#Figure 5B (Dimplot)
+############################################################################
+Idents(E18_v_Adult_CST) <- "orig.ident"
+levels(E18_v_Adult_CST)
+
+DimPlot(E18_v_Adult_CST, reduction = "umap", label = FALSE, pt.size = 1.5, 
+        label.size = 0, alpha = 0.5,cols = c("darkorange", "darkblue", "darkblue"), order = FALSE) + NoLegend() + NoAxes() 
+
+ggsave("Figure_5B-Dimplot.png",height = 6,width = 10,dpi = 300,units = "in")
+
+
+############################################################################
+#Figures 5C and 5D (Camk2a and Tubb2b Feature Plots)
+############################################################################
+
+
+#FeaturePlots
+pal <- viridis(n = 10, option = "D")
+FeaturePlot_scCustom(seurat_object = E18_v_Adult_CST,pt.size = 1.5, 
+                     features = "Camk2a", colors_use = pal, 
+                     order = F) & NoAxes() + theme(axis.text = element_text(size = 20),text = element_text (size = 20))
+
+ggsave("Figure_5C_Camk2a.png",height = 6,width = 10,dpi = 300,units = "in")
+
+
+pal <- viridis(n = 10, option = "D")
+FeaturePlot_scCustom(seurat_object = E18_v_Adult_CST,pt.size = 1.5, 
+                     features = "Tubb2b", colors_use = pal, 
+                     order = F) & NoAxes() + theme(axis.text = element_text(size = 20),text = element_text (size = 20))
+
+ggsave("Figure_5D_Tubb2b.png",height = 6,width = 10,dpi = 300,units = "in")
+
+##########################################################################
+#Figure 5E - MA plot
+##########################################################################
+#Input the DEG data. These data derive from the DEG output above but are filtered to remove non-annotated genes
+# (e.g. RIK, GM)
+E18_v_Adult_CST_data <- read.csv("E18_v_Adult_CST_Annotated_Back.csv")
+
+plot_data <- E18_v_Adult_CST_data %>% filter(!grepl("Rik", X), !grepl("^Gm", X),!grepl("Grik", X))
+
+#Select genes to label in the plot
+
+plot_data$mark <- ''  # Reset the column
+#selected Gene list
+specific_genes = c("Dpysl3", "Dpysl5"," Clmp","Tubb2b","Sox11","Tuba1a",
+                   "Marcksl1","Dcx","Pdlim1", "Camk2a", "Slit3", "Thrb", "Zbtb16")
+
+
+#Set text sizes
+inset_text <- 14
+axis_text_size <- 35
+axis_label_size <- 35
+gene_label_size <- 14
+
+plot_data$mark[plot_data$X %in% specific_genes] <- 'specific_gene'
+plot_data$average_expression <- rowMeans(plot_data[,c("pct.1", "pct.2")])
+plot_data$color <- ifelse(plot_data$avg_log2FC >1 & plot_data$p_val_adj > 0.05, "grey", 
+                          ifelse(plot_data$avg_log2FC >1 & plot_data$p_val_adj < 0.05, "green",
+                          ifelse(plot_data$avg_log2FC < -1 & plot_data$p_val_adj < 0.05, "red",
+                                 "grey")))
+num_upregulated <- sum(plot_data$avg_log2FC > 1 & plot_data$p_val_adj < 0.05)
+num_downregulated <- sum(plot_data$avg_log2FC < -1 & plot_data$p_val_adj < 0.05)
+
+ma_plot <- ggplot(plot_data, aes(x=average_expression, y=avg_log2FC, color=color)) +
+  geom_point(alpha=0.5) +
+  geom_point(data=plot_data[plot_data$mark == 'specific_gene',], aes(x=average_expression, y=avg_log2FC), color="black", size=3, shape=21, fill=plot_data[plot_data$mark == 'specific_gene',]$color) +  # Add bordered points for specific genes
+  geom_text_repel(data = plot_data[plot_data$X %in% specific_genes, ], aes(label = X, x = average_expression, y = avg_log2FC), size=gene_label_size, box.padding = .5, point.padding = 0.5, segment.color = 'black',color = "black") +  # Use ggrepel
+  scale_color_identity() +
+  geom_hline(yintercept = 0, color="black", alpha=0.7, linetype="dashed") +
+  geom_hline(yintercept = 1, color="green", linetype="dashed") +
+  geom_hline(yintercept = -1, color="red", linetype="dashed") +
+  xlab(expression(bold("Average Expression"))) + ylab(expression(bold("Log2 Fold Change"))) +
+  theme_few() +
+  theme(axis.text = element_text(size = axis_text_size)) +
+  theme(axis.title = element_text(size = axis_label_size)) +
+  scale_y_continuous(limits=c(-10, 10), breaks=seq(-10, 10, by=2)) +
+  annotate("text", x = Inf, y = Inf, label = paste("Upregulated:", num_upregulated, "\nDownregulated:", num_downregulated), vjust=1.05, hjust=1.05, size=inset_text, color="black")
+# Print the plot
+print(ma_plot)
+
+ggsave("Figure_5E_MA.png",height = 8,width = 18,dpi = 300,units = "in")
+
+
+################################################################################
+#Supplemental Figure 5-1 - Dimplot
+################################################################################
+
+# Visualize Dot Plot for Figure 5-1-B
+DotPlot(E18_1, features = c("Sox10","Pdgfra",
+                            "Pax6", "Top2a",
+                            "Slc1a3","Tnc",
+                            "Rbfox3",
+                            "Gad2",
+                            "Cux2",
+                            "Bcl11b","Fezf2"),
+        dot.scale = 8, dot.min = 0) + coord_flip() +
+  theme(axis.text.x = element_text (angle = 0, hjust = .5 ),
+        axis.text = element_text(size = 25)) #Sized for display
+ggsave("Figure_5_1_B.png",height = 8,width = 8,dpi = 300,units = "in")
+
+################################################################################
+#Supplemental Figure 5-1 - Feature Plots
+################################################################################
+
+#Visualizations for indivudal markers Figure 5-1-C-H. 
+FeaturePlot(E18_1, c("Gad2"), label = FALSE, pt.size = 1,
+            label.size = 13, repel = TRUE, order = FALSE) +
+  theme(axis.text = element_text(size = 40),
+        text = element_text (size = 35)) #1440 x 1000
+ggsave("Figure_5_1_C.png",height = 8,width = 8,dpi = 300,units = "in")
+
+FeaturePlot(E18_1, c("Pax6"), label = FALSE, pt.size = 1,
+            label.size = 13, repel = TRUE, order = FALSE) +
+  theme(axis.text = element_text(size = 40),
+        text = element_text (size = 35)) #1440 x 1000
+ggsave("Figure_5_1_D.png",height = 8,width = 8,dpi = 300,units = "in")
+
+FeaturePlot(E18_1, c("Cux2"), label = FALSE, pt.size = 1,
+            label.size = 13, repel = TRUE, order = FALSE) +
+  theme(axis.text = element_text(size = 40),
+        text = element_text (size = 35)) #1440 x 1000
+ggsave("Figure_5_1_E.png",height = 8,width = 8,dpi = 300,units = "in")
+
+FeaturePlot(E18_1, c("Sox10"), label = FALSE, pt.size = 1,
+            label.size = 13, repel = TRUE, order = FALSE) +
+  theme(axis.text = element_text(size = 40),
+        text = element_text (size = 35)) #1440 x 1000
+ggsave("Figure_5_1_F.png",height = 8,width = 8,dpi = 300,units = "in")
+
+FeaturePlot(E18_1, c("Slc1a3"), label = FALSE, pt.size = 1,
+            label.size = 13, repel = TRUE, order = FALSE) +
+  theme(axis.text = element_text(size = 40),
+        text = element_text (size = 35)) #1440 x 1000
+ggsave("Figure_5_1_G.png",height = 8,width = 8,dpi = 300,units = "in")
+
+FeaturePlot(E18_1, c("Bcl11b"), label = FALSE, pt.size = 1,
+            label.size = 13, repel = TRUE, order = FALSE) +
+  theme(axis.text = element_text(size = 40),
+        text = element_text (size = 35)) #1440 x 1000
+ggsave("Figure_5_1_H.png",height = 8,width = 8,dpi = 300,units = "in")
+
+
+
+################################################################################
+#Figure 6A - GO enrichment, E18 transcripts
+################################################################################
+setwd("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_6")
+
+#Select the input list
+go_input = read.csv("E18_v_Adult_CST_Annotated_Back.csv")
+
+#Filter the input list - the "Rik" and other filters should not be needed, but the log2FC and p_val are important
+go_input = go_input %>% filter(!grepl("Rik", X), !grepl("^Gm", X),!grepl("Grik", X),
+                               !grepl("CAG", X),!grepl("H2B", X),!grepl("80B", X),!grepl("BC0", X),
+                               !grepl("AAV", X))
+
+#Set thresholds for GO analysis (adjust the vales for the up and downregulated) 
+
+go_input = go_input %>% filter(go_input$avg_log2FC > 1 & go_input$p_val_adj < 0.05) 
+
+#Translate gene symbols into EntrizID
+my.symbols = go_input$X
+Entrezid=AnnotationDbi::select(org.Mm.eg.db, keys = my.symbols,columns = c("ENTREZID", "SYMBOL"),keytype = "SYMBOL") # converting your gene name to ENTREZID
+Embryo_annotation=Entrezid$ENTREZID #extrating only your entrezid for the input
+genelist=sort(Embryo_annotation,decreasing = TRUE) #sorting the ID
+genelist=na.omit(genelist) # removing the Null values
+
+genelist
+
+ego=enrichGO(gene = genelist,OrgDb = org.Mm.eg.db,
+             ont = "BP", readable = TRUE, minGSSize = 3, maxGSSize = 1500,pvalueCutoff = 0.05)
+
+
+write.csv(ego,"E18_GO_Up_Output.csv")
+
+data=read.csv ("E18_GO_Up_Output.csv")
+
+
+data = data %>%
+  mutate(Gene_Ratio = as.numeric(sub("(.*)/.*", "\\1", GeneRatio)) / 
+           as.numeric(sub(".*/(.*)", "\\1", GeneRatio)))
+processed_data <- data %>%
+  #filter(ONTOLOGY == "BP") %>%
+  arrange(p.adjust, desc(Count))
+
+processed_data=head(processed_data,10)
+
+#plot data
+
+library(ggplot2)
+library(viridis)
+ggplot(processed_data, aes(x = Gene_Ratio, y = reorder(Description, Gene_Ratio), size = Count, color = p.adjust)) +
+  geom_point(alpha = 0.7) +
+  scale_color_viridis(option = "D") + # color D for Up-regulated and F for Down-regulated
+  theme_classic() +
+  theme(text = element_text(color = "black", size = 15,face = "bold"), #family = "Times New Roman"),
+        axis.text.y = element_text(color = "black",size = 25), # Adjust text alignment and size as needed
+        axis.title = element_text(color = "black"),
+        axis.text.x = element_text(color = "black",angle = 90),
+        legend.title = element_text(color = "black"),
+        legend.text = element_text(color = "black")) +
+  labs(title = "",
+       x = "Gene Ratio",
+       y = "",
+       color = "P-adjust Value",
+       size = "Count")+
+  scale_y_discrete(labels = label_wrap_gen(width = 30))
+ggsave("Figure_6A_GO.png",height = 9,width = 9.5,dpi = 300,units = "in",bg = "white")
+
+################################################################################
+#Figure 6B - GO enrichment, Adult transcripts
+################################################################################
+setwd("Z:/Blackmore_Lab/13_Sox11_Manuscript/Figures_For_Upload/Figure_6")
+
+#Select the input list
+go_input = read.csv("E18_v_Adult_CST_Annotated_Back.csv")
+
+#Filter the input list - the "Rik" and other filters should not be needed, but the log2FC and p_val are important
+go_input = go_input %>% filter(!grepl("Rik", X), !grepl("^Gm", X),!grepl("Grik", X),
+                               !grepl("CAG", X),!grepl("H2B", X),!grepl("80B", X),!grepl("BC0", X),
+                               !grepl("AAV", X))
+
+#Set thresholds for GO analysis (adjust the vales for the up and downregulated) 
+
+go_input = go_input %>% filter(go_input$avg_log2FC < -1 & go_input$p_val_adj < 0.05 & pct.2 > .03) 
+
+#Translate gene symbols into EntrizID
+my.symbols = go_input$X
+Entrezid=AnnotationDbi::select(org.Mm.eg.db, keys = my.symbols,columns = c("ENTREZID", "SYMBOL"),keytype = "SYMBOL") # converting your gene name to ENTREZID
+Embryo_annotation=Entrezid$ENTREZID #extrating only your entrezid for the input
+genelist=sort(Embryo_annotation,decreasing = TRUE) #sorting the ID
+genelist=na.omit(genelist) # removing the Null values
+
+
+ego=enrichGO(gene = genelist,OrgDb = org.Mm.eg.db,
+             ont = "BP", readable = TRUE, minGSSize = 3, maxGSSize = 1000,pvalueCutoff = 0.05)
+
+
+write.csv(ego,"E18_GO_Down_Output.csv")
+
+data=read.csv ("E18_GO_Down_Output.csv")
+
+
+data = data %>%
+  mutate(Gene_Ratio = as.numeric(sub("(.*)/.*", "\\1", GeneRatio)) / 
+           as.numeric(sub(".*/(.*)", "\\1", GeneRatio)))
+processed_data <- data %>%
+  #filter(ONTOLOGY == "BP") %>%
+  arrange(p.adjust, desc(Count))
+
+processed_data=head(processed_data,10)
+
+#plot data
+
+library(ggplot2)
+library(viridis)
+ggplot(processed_data, aes(x = Gene_Ratio, y = reorder(Description, Gene_Ratio), size = Count, color = p.adjust)) +
+  geom_point(alpha = 0.7) +
+  scale_color_viridis(option = "F") + # color D for Up-regulated and F for Down-regulated
+  theme_classic() +
+  theme(text = element_text(color = "black", size = 15,face = "bold"), #family = "Times New Roman"),
+        axis.text.y = element_text(color = "black",size = 25), # Adjust text alignment and size as needed
+        axis.title = element_text(color = "black"),
+        axis.text.x = element_text(color = "black",angle = 90),
+        legend.title = element_text(color = "black"),
+        legend.text = element_text(color = "black")) +
+  labs(title = "",
+       x = "Gene Ratio",
+       y = "",
+       color = "P-adjust Value",
+       size = "Count")+
+  scale_y_discrete(labels = label_wrap_gen(width = 30))
+ggsave("Figure_6B_GO.png",height = 9,width = 9.5,dpi = 300,units = "in",bg = "white")
+
